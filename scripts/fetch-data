@@ -1,0 +1,54 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+
+from plano import *
+
+from datetime import date
+from requests import Session
+
+list_names = "qpid-dev", "qpid-users", "qpid-proton"
+start_dates = (2006, 8), (2007, 10), (2012, 8)
+
+# http://mail-archives.apache.org/mod_mbox/qpid-dev/201510.mbox
+
+make_dir("data")
+
+with Session() as session:
+    for i, list_name in enumerate(list_names):
+        start_year, start_month = start_dates[i]
+        today = date.today()
+
+        for year in range(start_year, today.year + 1):
+            print("#", list_name, year)
+
+            for month in range(1, 13):
+                if year == start_year and month < start_month:
+                    continue
+
+                if year == today.year and month > today.month:
+                    continue
+
+                file_name = "{}-{}{:02}.mbox"
+                file_name = file_name.format(list_name, year, month)
+
+                file = join("data", file_name)
+
+                if exists(file):
+                    notice("Already fetched {}", file)
+                    continue
+                
+                url = "http://mail-archives.apache.org/mod_mbox/{}/{}{:02}.mbox"
+                url = url.format(list_name, year, month)
+
+                notice("Fetching {}", url)
+        
+                response = session.get(url)
+
+                if response.status_code != 200:
+                    warn("HTTP request failed: {}", response.status_code)
+                    continue
+
+                with open(file, 'wb') as f:
+                    for chunk in response.iter_content(4096):
+                        f.write(chunk)

@@ -1,0 +1,17 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+
+from plano import *
+from mailbox import mbox
+
+from_addresses = set()
+
+for name in list_dir("data", "*.mbox"):
+    mb = mbox(join("data", name))
+
+    for msg in mb.itervalues():
+        from_addresses.add(msg["From"])
+
+for addr in sorted(from_addresses):
+    print(addr)
