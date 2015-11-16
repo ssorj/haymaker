@@ -81,8 +81,8 @@ class BrbnApplication:
             content = self._process_request(request)
         except _RequestError as e:
             return request.respond_error(e)
-        except Exception as e:
-            return request.respond_unexpected_error(e)
+        except Exception:
+            return request.respond_unexpected_error()
 
         return content
 
@@ -101,7 +101,7 @@ class BrbnApplication:
         try:
             content = self.files_by_path[path_info]
         except KeyError:
-            return request.respond("404 Not Found")
+            return request.respond_not_found()
 
         name, ext = _os.path.splitext(path_info)
 
@@ -128,7 +128,7 @@ class _Request:
         self.parameters = self._parse_query_string()
     
     def _parse_path(self):
-        path = self.env["PATH_INFO"]
+        path = self.path_info
         path = path[1:].split("/")
         path = [url_unescape(x) for x in path]
 
@@ -158,6 +158,10 @@ class _Request:
     @property
     def method(self):
         return self.env["REQUEST_METHOD"]
+
+    @property
+    def path_info(self):
+        return self.env["PATH_INFO"]
         
     def is_resource_modified(self, modification_time):
         ims_timestamp = self.env.get("HTTP_IF_MODIFIED_SINCE")
@@ -194,16 +198,23 @@ class _Request:
 
         return (content,)
 
+    def respond_ok(self, content, content_type):
+        return self.respond("200 OK", content, content_type)
+    
+    def respond_not_found(self):
+        content = "404 Not Found"
+        content_type = "text/plain"
+        
+        return self.respond("404 Not Found", content, content_type)
+
     def respond_error(self, error):
+        return self.respond_unexpected_error() # XXX
+
+    def respond_unexpected_error(self):
         content = _traceback.format_exc()
-        #content = xml_escape(content)
         content_type = "text/plain"
         
         return self.respond("500 Internal Server Error", content, content_type)
-
-    def respond_unexpected_error(self, error):
-        # XXX
-        return self.respond_error(error)
 
 class _RequestError(Exception):
     def __init__(self, request, message):
