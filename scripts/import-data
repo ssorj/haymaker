@@ -1,0 +1,131 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+
+import sqlite3
+
+from plano import *
+from mailbox import mbox
+
+class MessageDatabase:
+    def __init__(self, path):
+        self.path = path
+
+    def init(self):
+        columns = list()
+
+        for name in MessageRecord.fields:
+            field_type = MessageRecord.field_types.get(name, unicode)
+            column_type = "text"
+
+            if field_type == int:
+                column_type = "integer"
+
+            column = "{} {}".format(name, column_type)
+
+            columns.append(column)
+
+        statements = list()
+            
+        ddl = "create table messages ({});".format(", ".join(columns))
+        statements.append(ddl)
+
+        ddl = "create index messages_id_idx on messages (id);"
+        statements.append(ddl)
+        
+        conn = sqlite3.connect(self.path)
+        cursor = conn.cursor()
+
+        try:
+            for statement in statements:
+                cursor.execute(statement)
+        finally:
+            cursor.close()
+
+class MessageRecord:
+    fields = {
+        "id": "Message-ID",
+        "in_reply_to_id": "In-Reply-To",
+        "from_": "From",
+        "list_id": "List-Id",
+        "date": "Date",
+        "subject": "Subject",
+        "content_type": "Content",
+    }
+
+    field_types = {
+    }
+
+    def __init__(self):
+        for name in self.fields:
+            setattr(self, name, None)
+
+    def import_message(self, message):
+        for name in self.fields:
+            value = self.get_value(message, self.fields[name])
+            field_type = self.field_types.get(name, unicode)
+
+            if value is not None:
+                value = field_type(value)
+
+            setattr(self, name, value)
+
+    def get_value(self, message, name):
+        return message[name]
+
+    def insert(self, cursor):
+        fields = sorted(self.fields)
+        columns = ", ".join(fields)
+        values = ", ".join("?" * len(fields))
+        args = [getattr(self, x) for x in fields]
+
+        dml = "insert into messages ({}) values ({})".format(columns, values)
+
+        cursor.execute(dml, args)
+
+# for name in list_dir("data", "*.mbox"):
+#     mb = mbox(join("data", name))
+
+#     for msg in mb.itervalues():
+#         from_addresses.add(msg["From"])
+
+#     break
+
+database_file = "data/data.sqlite"
+
+database = MessageDatabase(database_file)
+database.init()
+
+conn = sqlite3.connect(database_file)
+cursor = conn.cursor()
+count = 0
+
+try:
+    for name in list_dir("data", "*.mbox"):
+        mb = mbox(join("data", name))
+        
+        for message in mb.values():
+            record = MessageRecord()
+            record.import_message(message)
+
+            if record.from_.endswith("<jira@apache.org>"):
+                continue
+            
+            if record.from_.endswith("<qpid-dev@incubator.apache.org>"):
+                continue
+            
+            if record.from_.endswith("<git@git.apache.org>"):
+                continue
+            
+            record.insert(cursor)
+
+            count += 1
+
+            if count % 100 == 0:
+                conn.commit()
+
+        #break # XXX
+finally:
+    cursor.close()
+
+# select from_, count(id) from messages group by from_ having count(id) > 50 order by count(id);
