@@ -9,13 +9,15 @@ class _Application(BrbnApplication):
 
         try:
             if request.path_info in ("/", "/index.html"):
-                return self.send_index(request)
+                return self.send_message_list(request)
+            if request.path_info == "/message.html":
+                return self.send_message_view(request)
         finally:
             request.database_connection.close()
 
         return request.respond_not_found()
         
-    def send_index(self, request):
+    def send_message_list(self, request):
         cursor = request.database_connection.cursor()
         statement = "select * from messages limit 200"
         content = list()
@@ -41,6 +43,11 @@ class _Application(BrbnApplication):
         # XXX page template
         
         return request.respond_ok(content, "text/html")
+
+    def send_message_view(self, request):
+        id_ = request.parameters["id"][0]
+
+        return request.respond_ok(id_, "text/plain")
     
 app = _Application()
 
@@ -125,8 +132,9 @@ class Message:
         return message
 
     @classmethod
-    def from_database_record(cls, record):
-        message = cls()
+    def from_database_record(cls, record, message=None):
+        if message is None:
+            message = cls()
 
         for i, name in enumerate(cls.fields):
             value = record[i]
@@ -139,10 +147,18 @@ class Message:
 
         return message
 
+    def load(self, cursor, id_):
+        sql = "select * from messages where id = ?"
+
+        cursor.execute(sql, [id_])
+
+        record = cursor.fetchone()
+
+        Message.from_database_record(record, self)
+    
     def save(self, cursor):
-        fields = sorted(self.fields)
-        columns = ", ".join(fields)
-        values = ", ".join("?" * len(fields))
+        columns = ", ".join(self.fields)
+        values = ", ".join("?" * len(self.fields))
         args = [getattr(self, x) for x in fields]
 
         dml = "insert into messages ({}) values ({})".format(columns, values)
