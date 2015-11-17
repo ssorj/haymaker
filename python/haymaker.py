@@ -17,14 +17,29 @@ class _Application(BrbnApplication):
         
     def send_index(self, request):
         cursor = request.database_connection.cursor()
-        statement = "select from_, substr(subject, 0, 80), date from messages limit 200"
+        statement = "select * from messages limit 200"
         content = list()
 
         cursor.execute(statement)
 
         records = cursor.fetchall()
-        content = html_table(records, False)
-                
+        rows = list()
+
+        for record in records:
+            message = Message.from_database_record(record)
+
+            cols = [
+                xml_escape(message.from_),
+                xml_escape(shorten(message.subject, 50)),
+                xml_escape(message.date),
+            ]
+
+            rows.append(cols)
+        
+        content = html_table(rows, False)
+
+        # XXX page template
+        
         return request.respond_ok(content, "text/html")
     
 app = _Application()
@@ -66,7 +81,20 @@ class MessageDatabase:
             conn.close()
 
 class Message:
-    fields = {
+    fields = [
+        "id",
+        "in_reply_to_id",
+        "from_",
+        "list_id",
+        "date",
+        "subject",
+        "content_type",
+    ]
+    
+    field_types = {
+    }
+
+    field_mbox_keys = {
         "id": "Message-ID",
         "in_reply_to_id": "In-Reply-To",
         "from_": "From",
@@ -74,9 +102,6 @@ class Message:
         "date": "Date",
         "subject": "Subject",
         "content_type": "Content",
-    }
-
-    field_types = {
     }
 
     def __init__(self):
@@ -88,7 +113,23 @@ class Message:
         message = cls()
 
         for name in cls.fields:
-            value = mbox_message.get(cls.fields[name])
+            mbox_key = cls.field_mbox_keys[name]
+            value = mbox_message.get(mbox_key)
+            field_type = cls.field_types.get(name, str)
+
+            if value is not None:
+                value = field_type(value)
+
+            setattr(message, name, value)
+
+        return message
+
+    @classmethod
+    def from_database_record(cls, record):
+        message = cls()
+
+        for i, name in enumerate(cls.fields):
+            value = record[i]
             field_type = cls.field_types.get(name, str)
 
             if value is not None:

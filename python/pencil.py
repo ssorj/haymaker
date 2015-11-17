@@ -28,6 +28,9 @@ from xml.sax.saxutils import unescape as _xml_unescape
 # String formatting functions
 
 def shorten(s, max):
+    if s is None:
+        return ""
+    
     if len(s) < max:
         return s
     else:
@@ -46,7 +49,7 @@ def init_cap(s):
     return s[0].upper() + s[1:]
 
 def first_sentence(text):
-    if not text:
+    if text is None:
         return ""
 
     match = _re.search(r"(.+?)\.\s+", text, _re.DOTALL)
@@ -61,7 +64,7 @@ def first_sentence(text):
 
 def plural(noun, count=0):
     if noun is None:
-        return
+        return ""
 
     if count == 1:
         return noun
@@ -282,7 +285,7 @@ def html_section(content, **attrs):
     return _html_elem("section", content, attrs)
 
 def html_table(items, first_row_headings=True, first_col_headings=False,
-               escape_cell_data=True, **attrs):
+               escape_cell_data=False, **attrs):
     row_headings = list()
     rows = list()
 
