@@ -4,6 +4,6 @@
 
 devel:
 #	scripts/fetch-data
-	rm data/data.sqlite
+	rm -f data/data.sqlite
 	scripts/import-data
 #	sqlite3 data/data.sqlite
