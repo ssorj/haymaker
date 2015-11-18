@@ -94,7 +94,9 @@ class BrbnApplication:
     def receive_request(self, request):
         pass
 
-    def send_file(self, request, path_info):
+    def send_file(self, request):
+        path_info = request.path_info
+        
         if path_info == "/":
             path_info = "/index.html"
         

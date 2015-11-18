@@ -71,6 +71,8 @@ def main():
     config = load_config(args)
     app = import_app(args)
 
+    app.home_dir = home_dir
+
     app.load()
 
     http_server = HTTPServer(WSGIContainer(app))

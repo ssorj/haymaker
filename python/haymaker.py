@@ -1,26 +1,35 @@
 import sqlite3 as _sqlite
 
 from brbn import *
+from faller import *
 from pencil import *
 
-class _Application(BrbnApplication):
+_log = logger("haymaker")
+_strings = StringCatalog(__file__)
+
+class Application(BrbnApplication):
     def receive_request(self, request):
         request.database_connection = _sqlite.connect("data/data.sqlite") # XXX
 
         try:
-            if request.path_info in ("/", "/index.html"):
-                return self.send_message_list(request)
-            if request.path_info == "/message.html":
-                return self.send_message_view(request)
+            return self.do_receive_request(request)
         finally:
             request.database_connection.close()
 
         return request.respond_not_found()
+
+    def do_receive_request(self, request):
+        if request.path_info in ("/", "/index.html"):
+            return self.send_message_index(request)
+
+        if request.path_info == "/message.html":
+            return self.send_message_view(request)
         
-    def send_message_list(self, request):
+        return self.send_file(request)
+
+    def send_message_index(self, request):
         cursor = request.database_connection.cursor()
         statement = "select * from messages limit 200"
-        content = list()
 
         cursor.execute(statement)
 
@@ -29,27 +38,38 @@ class _Application(BrbnApplication):
 
         for record in records:
             message = Message.from_database_record(record)
-
+            message_href = "/message.html?id={}".format(url_escape(message.id))
+            
             cols = [
+                html_a(xml_escape(message.subject), message_href),
                 xml_escape(message.from_),
-                xml_escape(shorten(message.subject, 50)),
                 xml_escape(message.date),
             ]
 
             rows.append(cols)
-        
-        content = html_table(rows, False)
 
-        # XXX page template
-        
+        title = "Message Index"
+        path_navigation = [(title, "/")]
+        body = html_table(rows, False)
+        content = html_page(title, path_navigation, body)
+
         return request.respond_ok(content, "text/html")
 
     def send_message_view(self, request):
-        id_ = request.parameters["id"][0]
+        id = request.parameters["id"][0]
 
-        return request.respond_ok(id_, "text/plain")
+        cursor = request.database_connection.cursor()
+        message = Message.for_id(cursor, id)
+
+        title = "Message {}".format(message.id)
+        message_href = "/message.html?id={}".format(url_escape(message.id))
+        path_navigation = [("Message Index", "/"), (title, message_href)]
+        body = _strings["message_view"].format(message=message)
+        content = html_page(title, path_navigation, body)
+        
+        return request.respond_ok(content, "text/html")
     
-app = _Application()
+app = Application()
 
 class MessageDatabase:
     def __init__(self, path):
@@ -115,6 +135,8 @@ class Message:
         for name in self.fields:
             setattr(self, name, None)
 
+        self.payload = None
+
     @classmethod
     def from_mbox_message(cls, mbox_message):
         message = cls()
@@ -132,10 +154,9 @@ class Message:
         return message
 
     @classmethod
-    def from_database_record(cls, record, message=None):
-        if message is None:
-            message = cls()
-
+    def from_database_record(cls, record):
+        message = Message()
+        
         for i, name in enumerate(cls.fields):
             value = record[i]
             field_type = cls.field_types.get(name, str)
@@ -147,14 +168,15 @@ class Message:
 
         return message
 
-    def load(self, cursor, id_):
+    @classmethod
+    def for_id(cls, cursor, id_):
         sql = "select * from messages where id = ?"
 
         cursor.execute(sql, [id_])
 
         record = cursor.fetchone()
 
-        Message.from_database_record(record, self)
+        return Message.from_database_record(record)
     
     def save(self, cursor):
         columns = ", ".join(self.fields)
@@ -164,3 +186,9 @@ class Message:
         dml = "insert into messages ({}) values ({})".format(columns, values)
 
         cursor.execute(dml, args)
+
+def html_page(title, path_navigation, body):
+    links = [html_a(xml_escape(text), href) for text, href in path_navigation]
+    path_navigation = html_ul(links, id="-path-navigation")
+
+    return _strings["page_template"].format(**locals())
