@@ -25,11 +25,19 @@
   </body>
 </html>
 
+[message_index]
+<form id="query" action="?" method="get">
+  <textarea name="query">{query}</textarea>
+  <input type="submit"/>
+</form>
+
+{messages}
+
 [message_view]
 <pre>
-From:     {message.from_}
+From:     {message.from_name} &lt;{message.from_address}&gt;
 Date:     {message.date}
 Subject:  {message.subject}
 
-{message.payload}
+{message.content}
 </pre>

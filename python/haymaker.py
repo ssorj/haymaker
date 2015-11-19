@@ -1,4 +1,28 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+import os as _os
 import sqlite3 as _sqlite
+import time as _time
+import email.utils as _email
+
+from datetime import datetime as _datetime
 
 from brbn import *
 from faller import *
@@ -7,9 +31,21 @@ from pencil import *
 _log = logger("haymaker")
 _strings = StringCatalog(__file__)
 
-class Application(BrbnApplication):
+class Haymaker(BrbnApplication):
+    def __init__(self):
+        super().__init__()
+
+        title = "Haymaker"
+        href = "/index.html"
+        self.message_index = Page(self, None, title, href)
+
+        title = "Message '{}'"
+        href = "/message.html?id={}"
+        self.message_view = Page(self, self.message_index, title, href)
+    
     def receive_request(self, request):
-        request.database_connection = _sqlite.connect("data/data.sqlite") # XXX
+        path = _os.path.join(self.home_dir, "data", "data.sqlite")
+        request.database_connection = _sqlite.connect(path)
 
         try:
             return self.do_receive_request(request)
@@ -29,29 +65,30 @@ class Application(BrbnApplication):
 
     def send_message_index(self, request):
         cursor = request.database_connection.cursor()
-        statement = "select * from messages limit 200"
 
-        cursor.execute(statement)
+        default = ["select * from messages where from_address = 'gsim@redhat.com' order by date desc limit 1000"]
+        query = request.parameters.get("query", default)[0]
+
+        cursor.execute(query)
 
         records = cursor.fetchall()
         rows = list()
 
         for record in records:
             message = Message.from_database_record(record)
-            message_href = "/message.html?id={}".format(url_escape(message.id))
+            message_href = self.message_view.href.format(url_escape(message.id))
             
             cols = [
                 html_a(xml_escape(message.subject), message_href),
-                xml_escape(message.from_),
-                xml_escape(message.date),
+                xml_escape(message.from_address),
+                xml_escape(str(message.date)),
             ]
 
             rows.append(cols)
 
-        title = "Message Index"
-        path_navigation = [(title, "/")]
-        body = html_table(rows, False)
-        content = html_page(title, path_navigation, body)
+        messages = html_table(rows, False)
+        body = _strings["message_index"].format(query=query, messages=messages)
+        content = self.message_index.render(None, None, body)
 
         return request.respond_ok(content, "text/html")
 
@@ -61,15 +98,33 @@ class Application(BrbnApplication):
         cursor = request.database_connection.cursor()
         message = Message.for_id(cursor, id)
 
-        title = "Message {}".format(message.id)
-        message_href = "/message.html?id={}".format(url_escape(message.id))
-        path_navigation = [("Message Index", "/"), (title, message_href)]
         body = _strings["message_view"].format(message=message)
-        content = html_page(title, path_navigation, body)
-        
+        content = self.message_view.render(message.subject, message.id, body)
+
         return request.respond_ok(content, "text/html")
+
+class Page:
+    def __init__(self, app, parent, title, href):
+        self.app = app
+        self.parent = parent
+        self.title = title
+        self.href = href
     
-app = Application()
+    def render(self, object_name, object_id, body):
+        title = self.title.format(xml_escape(object_name))
+        href = self.href.format(object_id)
+
+        items = list()
+        
+        if self.parent is not None:
+            items.append((self.parent.title, self.parent.href))
+        
+        items.append((title, href))
+
+        links = [html_a(text, href) for text, href in items]
+        path_navigation = html_ul(links, id="-path-navigation")
+
+        return _strings["page_template"].format(**locals())
 
 class MessageDatabase:
     def __init__(self, path):
@@ -111,22 +166,23 @@ class Message:
     fields = [
         "id",
         "in_reply_to_id",
-        "from_",
+        "from_name",
+        "from_address",
         "list_id",
         "date",
         "subject",
         "content_type",
+        "content",
     ]
     
     field_types = {
+        "date": int,
     }
 
     field_mbox_keys = {
         "id": "Message-ID",
         "in_reply_to_id": "In-Reply-To",
-        "from_": "From",
         "list_id": "List-Id",
-        "date": "Date",
         "subject": "Subject",
         "content_type": "Content",
     }
@@ -135,13 +191,11 @@ class Message:
         for name in self.fields:
             setattr(self, name, None)
 
-        self.payload = None
-
     @classmethod
     def from_mbox_message(cls, mbox_message):
         message = cls()
 
-        for name in cls.fields:
+        for name in cls.field_mbox_keys:
             mbox_key = cls.field_mbox_keys[name]
             value = mbox_message.get(mbox_key)
             field_type = cls.field_types.get(name, str)
@@ -151,11 +205,28 @@ class Message:
 
             setattr(message, name, value)
 
+        name, address = _email.parseaddr(mbox_message["From"])
+
+        message.from_name = name
+        message.from_address = address
+
+        tup = _email.parsedate(mbox_message["Date"])
+        message.date = _time.mktime(tup)
+        
+        if mbox_message.is_multipart():
+            for part in mbox_message.walk():
+                if part.get_content_type() == "text/plain":
+                    message.content = part.get_payload()
+                    break
+                    
+        elif mbox_message.get_content_type() == "text/plain":
+            message.content = mbox_message.get_payload()
+
         return message
 
     @classmethod
     def from_database_record(cls, record):
-        message = Message()
+        message = cls()
         
         for i, name in enumerate(cls.fields):
             value = record[i]
@@ -181,14 +252,13 @@ class Message:
     def save(self, cursor):
         columns = ", ".join(self.fields)
         values = ", ".join("?" * len(self.fields))
-        args = [getattr(self, x) for x in fields]
+        args = [getattr(self, x) for x in self.fields]
 
         dml = "insert into messages ({}) values ({})".format(columns, values)
 
         cursor.execute(dml, args)
 
-def html_page(title, path_navigation, body):
-    links = [html_a(xml_escape(text), href) for text, href in path_navigation]
-    path_navigation = html_ul(links, id="-path-navigation")
+    def __repr__(self):
+        return format_repr(self, self.id)
 
-    return _strings["page_template"].format(**locals())
+app = Haymaker()

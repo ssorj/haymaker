@@ -125,8 +125,7 @@ dd > p:last-child {
     margin-bottom: 1em;
 }
 
-form input,
-form button {
+input, button, textarea, submit {
     font-family: inherit;
     font-size: inherit;
     border: 1px solid #ccc;
@@ -170,14 +169,12 @@ hr {
     border-bottom: 1px solid #ddd;
 }
 
-code,
-pre {
+code {
     background-color: rgb(247, 247, 247);
 }
 
 pre {
     overflow: auto;
-    padding: 1em;
 }
 
 blockquote {
@@ -321,4 +318,8 @@ section {
     #-body {
         padding: 0;
     }
+}
+
+#query textarea {
+    width: 100%;
 }

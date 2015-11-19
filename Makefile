@@ -1,9 +1,11 @@
-.PHONY: devel
+.PHONY: devel import
 
-# python-requests
+# python3-requests, python3-tornado
 
 devel:
-#	scripts/fetch-data
+	brbn --app haymaker
+
+import:
+	scripts/fetch-data
 	rm -f data/data.sqlite
 	scripts/import-data
-#	sqlite3 data/data.sqlite

@@ -28,26 +28,24 @@ from mailbox import mbox
 
 def import_mbox(cursor, path):
     mb = mbox(path)
-    count = 0
     
     for mbox_message in mb.values():
         message = Message.from_mbox_message(mbox_message)
 
-        if message.from_.endswith("<jira@apache.org>"):
+        if message.from_address == "jira@apache.org":
             continue
         
-        if message.from_.endswith("<qpid-dev@incubator.apache.org>"):
+        if message.from_address == "qpid-dev@incubator.apache.org":
             continue
         
-        if message.from_.endswith("<git@git.apache.org>"):
+        if message.from_address == "git@git.apache.org":
             continue
+
+        print(message)
         
         message.save(cursor)
 
-        count += 1
-
-        if count % 100 == 0:
-            cursor.connection.commit()
+        cursor.connection.commit()
 
 database_file = "data/data.sqlite"
 
