@@ -1,8 +1,7 @@
-[page_template]
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head>
-    <title>{title}</title>
+    <title>Brbn</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <link rel="stylesheet" href="/site.css" type="text/css"/>
@@ -10,12 +9,24 @@
   <body>
     <div id="-head">
       <div id="-head-content">
-        {path_navigation}
+        Brbn
       </div>
     </div>
     <div id="-body">
       <div id="-body-content">
-        {body}
+        <h2>Create example.py</h2>
+          
+<pre>class Application(BrbnApplication):
+    def receive_request(self, request):
+        if request.path_info == "/hello.txt":
+            return request.respond_ok("Hello!", "text/plain")
+
+        return self.send_file(request)</pre>
+
+<h2>Run the application</h2>
+
+<pre>$ brbn --app example:Application
+MainTh 2015-11-20 07:10:57,090 INFO Listening on port 8000</pre>
       </div>
     </div>
     <div id="-foot">
@@ -25,20 +36,3 @@
   </body>
 </html>
 
-[message_index]
-<form id="query" action="?" method="get">
-  <textarea name="query">{query}</textarea>
-  <input type="submit"/>
-</form>
-
-{messages}
-
-[message_view]
-<pre>
-From:         {message.from_name} &lt;{message.from_address}&gt;
-Date:         {date}
-Subject:      {message.subject}
-In-Reply-To:  {in_reply_to_link}
-
-{message.content}
-</pre>

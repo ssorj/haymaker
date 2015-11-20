@@ -87,15 +87,16 @@ class BrbnApplication:
         return content
 
     def _process_request(self, request):
-        request.load()
+        request._load()
 
         return self.receive_request(request)
     
     def receive_request(self, request):
         pass
 
-    def send_file(self, request):
-        path_info = request.path_info
+    def send_file(self, request, path_info=None):
+        if path_info is None:
+            path_info = request.path_info
         
         if path_info == "/":
             path_info = "/index.html"
@@ -125,7 +126,7 @@ class _Request:
         self.path = None
         self.parameters = None
 
-    def load(self):
+    def _load(self):
         self.path = self._parse_path()
         self.parameters = self._parse_query_string()
     
@@ -203,6 +204,14 @@ class _Request:
     def respond_ok(self, content, content_type):
         return self.respond("200 OK", content, content_type)
     
+    def respond_redirect(self, location):
+        self.response_headers.append(("Location", str(location)))
+
+        return self.respond("303 See Other")
+
+    def respond_not_modified(self):
+        return self.respond("304 Not Modified")
+    
     def respond_not_found(self):
         content = "404 Not Found"
         content_type = "text/plain"
@@ -210,7 +219,10 @@ class _Request:
         return self.respond("404 Not Found", content, content_type)
 
     def respond_error(self, error):
-        return self.respond_unexpected_error() # XXX
+        content = "Error! {}".format(str(error))
+        content_type = "text/plain"
+        
+        return self.respond("500 Internal Server Error", content, content_type)
 
     def respond_unexpected_error(self):
         content = _traceback.format_exc()
@@ -261,3 +273,10 @@ def xml_unescape(string):
         return
 
     return _xml_unescape(string)
+
+class ExampleApplication(BrbnApplication):
+    def receive_request(self, request):
+        if request.path_info in ("/", "/index.html"):
+            return self.send_file(request, "/example.html")
+
+        return self.send_file(request)

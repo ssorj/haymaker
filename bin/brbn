@@ -45,13 +45,14 @@ default_config_file = os.path.join(user_dir, ".config", "brbn", "config.py")
 
 description = "Brbn serves HTTP requests"
 
-# epilog = """Brbn looks for its configuration in the following locations: (1)
-# the FILE indicated by --config if set, (2)
-# $HOME/.config/brbn/config.py, (3) /etc/brbn/config.py."""
+epilog = """Brbn looks for its configuration in the following locations: (1)
+the FILE indicated by --config if set, (2)
+$HOME/.config/brbn/config.py, (3) /etc/brbn/config.py."""
 
-parser = ArgumentParser(description=description)
+parser = ArgumentParser(description=description, epilog=epilog)
 
-parser.add_argument("--app", metavar="MODULE")
+parser.add_argument("--app", metavar="SPEC",
+                    help="Find app class at SPEC (brbn:ExampleApplication)")
 
 parser.add_argument("--port", metavar="PORT",
                     help="Serve HTTP at PORT (8000)")
@@ -69,50 +70,52 @@ def main():
 
     args = parser.parse_args()
     config = load_config(args)
-    app = import_app(args)
+    cls = import_app(config)
 
-    app.home_dir = home_dir
-
+    app = cls(home_dir)
     app.load()
 
-    http_server = HTTPServer(WSGIContainer(app))
-    http_server.listen(config["port"])
+    port = config["port"]
+    
+    server = HTTPServer(WSGIContainer(app))
+    server.listen(port)
 
+    _log.info("Listening on port {}".format(port))
+    
     IOLoop.current().start()
 
 def load_config(args):
     config_file = args.config
-        
+    config = dict()
+
+    config["home_dir"] = home_dir
+    config["app"] = "brbn:ExampleApplication"
+    config["port"] = 8000
+
     if not os.path.exists(config_file):
         config_file = os.path.join("/", "etc", "brbn", "config.py")
 
     if os.path.exists(config_file):
-        _log.info("Loading configuration from {}".format(config_file))
+        _log.info("Loading configuration from '{}'".format(config_file))
 
-        # init_globals = {"model": model}
-        # config = runpy.run_path(config_file, init_globals)
+        entries = runpy.run_path(config_file, config)
+        config.update(entries)
 
-        config = runpy.run_path(config_file)
-    else:
-        config = dict()
+    if args.app is not None:
+        config["app"] = args.app
 
     if args.port is not None:
         config["port"] = args.port
 
-    if "port" not in config:
-        config["port"] = 8000
-
     return config
 
-def import_app(args):
-    if args.app is None:
-        # XXX get app from config
-        raise Exception()
-
-    if ":" in args.app:
-        module_name, app_name = args.app.split(":", 1)
+def import_app(config):
+    app_spec = config["app"]
+    
+    if ":" in app_spec:
+        module_name, class_name = app_spec.split(":", 1)
     else:
-        module_name, app_name = args.app, "app"
+        module_name, class_name = app_spec, "Application"
 
     try:
         module = importlib.import_module(module_name)
@@ -120,11 +123,11 @@ def import_app(args):
         exit(str(e))
 
     try:
-        app = getattr(module, app_name)
+        cls = getattr(module, class_name)
     except AttributeError:
-        exit("No application named '{}'", app_name)
+        exit("No application named '{}'", class_name)
 
-    return app
+    return cls
 
 def exit(message=None, *args):
     if message is None:

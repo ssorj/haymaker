@@ -31,9 +31,9 @@ from pencil import *
 _log = logger("haymaker")
 _strings = StringCatalog(__file__)
 
-class Haymaker(BrbnApplication):
-    def __init__(self):
-        super().__init__()
+class Application(BrbnApplication):
+    def __init__(self, home_dir):
+        super().__init__(home_dir)
 
         title = "Haymaker"
         href = "/index.html"
@@ -81,7 +81,7 @@ class Haymaker(BrbnApplication):
             cols = [
                 html_a(xml_escape(message.subject), message_href),
                 xml_escape(message.from_address),
-                xml_escape(str(message.date)),
+                xml_escape(str(_email.formatdate(message.date))),
             ]
 
             rows.append(cols)
@@ -98,7 +98,19 @@ class Haymaker(BrbnApplication):
         cursor = request.database_connection.cursor()
         message = Message.for_id(cursor, id)
 
-        body = _strings["message_view"].format(message=message)
+        if message is None:
+            return request.respond_not_found()
+        
+        date = _email.formatdate(message.date)
+
+        rmessage = Message.for_id(cursor, message.in_reply_to_id)
+        in_reply_to_link = ""
+        
+        if rmessage is not None:
+            href = self.message_view.href.format(rmessage.id)
+            in_reply_to_link = html_a(rmessage.subject, href)
+        
+        body = _strings["message_view"].format(**locals())
         content = self.message_view.render(message.subject, message.id, body)
 
         return request.respond_ok(content, "text/html")
@@ -247,6 +259,9 @@ class Message:
 
         record = cursor.fetchone()
 
+        if record is None:
+            return
+
         return Message.from_database_record(record)
     
     def save(self, cursor):
@@ -260,5 +275,3 @@ class Message:
 
     def __repr__(self):
         return format_repr(self, self.id)
-
-app = Haymaker()
