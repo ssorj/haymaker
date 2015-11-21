@@ -66,10 +66,13 @@ class Application(BrbnApplication):
     def send_message_index(self, request):
         cursor = request.database_connection.cursor()
 
-        default = ["select * from messages where from_address = 'gsim@redhat.com' order by date desc limit 1000"]
-        query = request.parameters.get("query", default)[0]
+        default_query = ["from_address = 'gsim@redhat.com'"]
+        query = request.parameters.get("query", default_query)[0]
 
-        cursor.execute(query)
+        sql = "select * from messages where {}".format(query)
+        sql = "{} order by date desc limit 1000".format(sql)
+        
+        cursor.execute(sql)
 
         records = cursor.fetchall()
         rows = list()
@@ -81,13 +84,15 @@ class Application(BrbnApplication):
             cols = [
                 html_a(xml_escape(message.subject), message_href),
                 xml_escape(message.from_address),
-                xml_escape(str(_email.formatdate(message.date))),
+                message.authored_lines,
+                xml_escape(str(_email.formatdate(message.date)[:-6])),
             ]
 
             rows.append(cols)
 
-        messages = html_table(rows, False)
-        body = _strings["message_index"].format(query=query, messages=messages)
+        fields = html_ul(Message.fields, class_="four-column")
+        messages = html_table(rows, False, class_="messages")
+        body = _strings["message_index"].format(**locals())
         content = self.message_index.render(None, None, body)
 
         return request.respond_ok(content, "text/html")
@@ -100,17 +105,25 @@ class Application(BrbnApplication):
 
         if message is None:
             return request.respond_not_found()
-        
-        date = _email.formatdate(message.date)
 
         rmessage = Message.for_id(cursor, message.in_reply_to_id)
         in_reply_to_link = ""
         
         if rmessage is not None:
             href = self.message_view.href.format(rmessage.id)
-            in_reply_to_link = html_a(rmessage.subject, href)
+            in_reply_to_link = html_a(rmessage.id, href)
+
+        values = {
+            "id": xml_escape(message.id),
+            "in_reply_to_link": in_reply_to_link,
+            "list_id": xml_escape(message.list_id),
+            "from": xml_escape("{} <{}>".format(message.from_name, message.from_address)),
+            "date": xml_escape(_email.formatdate(message.date)),
+            "subject": xml_escape(message.subject),
+            "message_content": xml_escape(message.content),
+        }
         
-        body = _strings["message_view"].format(**locals())
+        body = _strings["message_view"].format(**values)
         content = self.message_view.render(message.subject, message.id, body)
 
         return request.respond_ok(content, "text/html")
@@ -185,10 +198,12 @@ class Message:
         "subject",
         "content_type",
         "content",
+        "authored_lines",
     ]
     
     field_types = {
         "date": int,
+        "authored_lines": int,
     }
 
     field_mbox_keys = {
@@ -234,6 +249,22 @@ class Message:
         elif mbox_message.get_content_type() == "text/plain":
             message.content = mbox_message.get_payload()
 
+        count = 0
+
+        if message.content is not None:
+            for line in message.content.splitlines():
+                line = line.strip()
+
+                if line.startswith(">"):
+                    continue
+
+                if line == "":
+                    continue
+
+                count += 1
+
+        message.authored_lines = count
+            
         return message
 
     @classmethod

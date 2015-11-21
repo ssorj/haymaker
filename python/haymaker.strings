@@ -26,19 +26,28 @@
 </html>
 
 [message_index]
+<h1>Haymaker</h1>
+
+<h2>Query</h2>
+
+{fields}
+
 <form id="query" action="?" method="get">
-  <textarea name="query">{query}</textarea>
-  <input type="submit"/>
+  <input name="query" value="{query}" autofocus="autofocus"/>
+  <button>Submit</button>
 </form>
+
+<h2>Messages</h2>
 
 {messages}
 
 [message_view]
-<pre>
-From:         {message.from_name} &lt;{message.from_address}&gt;
-Date:         {date}
-Subject:      {message.subject}
-In-Reply-To:  {in_reply_to_link}
+<pre>Id:              {id}
+In-Reply-To-Id:  {in_reply_to_link}
+List-Id:         {list_id}
 
-{message.content}
-</pre>
+From:            {from}
+Date:            {date}
+Subject:         {subject}
+
+{message_content}</pre>

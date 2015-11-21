@@ -96,13 +96,13 @@ a.heading-link:hover {
 }
 
 ol,
-ul,
 dd {
     padding-left: 1.2em;
 }
 
 ul {
     list-style-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdAAAAHQBMYXlgQAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAABMSURBVCjPY/j//z8DFtwAxRhyuBTDQAMhDWDF9+/f/wfC2DRhVRwcHPwfhLFpwqrYxcUFjLFpwqkYlyayNJDsJLI8TVawkhVxBJMGABnYvZjQ/qzjAAAAAElFTkSuQmCC");
+    list-style-position: inside;
 }
 
 li,
@@ -320,6 +320,28 @@ section {
     }
 }
 
-#query textarea {
+#query input {
     width: 100%;
+    padding: 0.4em;
+}
+
+#query button {
+    padding: 0.4em;
+}
+
+table.messages td:nth-child(1) {
+    width: 50%;
+}
+
+table.messages td:nth-child(2) {
+    width: 20%;
+}
+
+table.messages td:nth-child(3) {
+    width: 5%;
+    text-align: right;
+}
+
+table.messages td:nth-child(4) {
+    text-align: right;
 }
