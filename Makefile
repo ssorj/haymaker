@@ -3,7 +3,7 @@
 # python3-requests, python3-tornado
 
 devel:
-	brbn --app haymaker
+	haymaker
 
 import:
 	scripts/fetch-data
