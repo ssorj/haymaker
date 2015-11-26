@@ -6,6 +6,7 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <link rel="stylesheet" href="/site.css" type="text/css"/>
+    <link rel="icon" href="" type="image/png"/>
   </head>
   <body>
     <div id="-head">
@@ -28,16 +29,9 @@
 [message_index]
 <h1>Haymaker</h1>
 
-<h2>Query</h2>
-
-{fields}
-
 <form id="query" action="?" method="get">
   <input name="query" value="{query}" autofocus="autofocus"/>
-  <button>Submit</button>
 </form>
-
-<h2>Messages</h2>
 
 {messages}
 

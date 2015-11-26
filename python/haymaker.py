@@ -66,13 +66,13 @@ class Application(BrbnApplication):
     def send_message_index(self, request):
         cursor = request.database_connection.cursor()
 
-        default_query = ["from_address = 'gsim@redhat.com'"]
-        query = request.parameters.get("query", default_query)[0]
+        query = request.parameters.get("query", [""])[0]
 
-        sql = "select * from messages where {}".format(query)
-        sql = "{} order by date desc limit 1000".format(sql)
+        sql = "select * from messages where id in "
+        sql += "(select id from messages_fts where messages_fts match ?) "
+        sql += "order by date desc limit 1000"
         
-        cursor.execute(sql)
+        cursor.execute(sql, [query])
 
         records = cursor.fetchall()
         rows = list()
@@ -170,11 +170,17 @@ class MessageDatabase:
             columns.append(column)
 
         statements = list()
-            
-        ddl = "create table messages ({});".format(", ".join(columns))
+
+        columns = ", ".join(columns)
+        ddl = "create table messages ({});".format(columns)
         statements.append(ddl)
 
         ddl = "create index messages_id_idx on messages (id);"
+        statements.append(ddl)
+
+        columns = ", ".join(Message.fts_fields)
+        ddl = "create virtual table messages_fts"
+        ddl = "{} using fts4 ({}, notindexed=id)".format(ddl, columns)
         statements.append(ddl)
         
         conn = _sqlite.connect(self.path)
@@ -200,7 +206,7 @@ class Message:
         "content",
         "authored_lines",
     ]
-    
+
     field_types = {
         "date": int,
         "authored_lines": int,
@@ -214,6 +220,12 @@ class Message:
         "content_type": "Content",
     }
 
+    fts_fields = [
+        "id",
+        "subject",
+        "content",
+    ]
+    
     def __init__(self):
         for name in self.fields:
             setattr(self, name, None)
@@ -304,5 +316,13 @@ class Message:
 
         cursor.execute(dml, args)
 
+        columns = ", ".join(self.fts_fields)
+        values = ", ".join("?" * len(self.fts_fields))
+        args = [getattr(self, x) for x in self.fts_fields]
+
+        dml = "insert into messages_fts ({}) values ({})".format(columns, values)
+
+        cursor.execute(dml, args)
+        
     def __repr__(self):
         return format_repr(self, self.id)
