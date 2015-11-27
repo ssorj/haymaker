@@ -74,10 +74,13 @@ class Application(BrbnApplication):
 
     def send_index(self, request):
         sql = "select distinct(from_address) from messages"
-        records = self.database.execute(request, sql)
+        records = self.database.query(request, sql)
 
+        items = [x[0] for x in records]
+        users = html_ul(items)
+        
         values = {
-            "users": "",
+            "users": users,
             "months": "",
         }
         
@@ -86,15 +89,14 @@ class Application(BrbnApplication):
     def send_message(self, request):
         id = request.parameters["id"][0]
 
-        cursor = self.database.cursor(request)
-        message = Message.for_id(cursor, id)
+        message = self.database.get(request, Message, id)
 
-        # XXX message = self.database.load(request, Message, id)
+        # XXX message = self.database.get(request, Message, id)
 
         if message is None:
             return request.respond_not_found()
 
-        referenced = Message.for_id(cursor, message.in_reply_to_id)
+        referenced = self.database.get(request, Message, message.in_reply_to_id)
         in_reply_to_link = ""
         
         if referenced is not None:
@@ -122,7 +124,7 @@ class Application(BrbnApplication):
                "(select id from messages_fts where messages_fts match ?) "
                "order by date desc limit 1000")
 
-        records = self.database.execute(request, sql, query)
+        records = self.database.query(request, sql, query)
         rows = list()
 
         for record in records:
@@ -262,18 +264,35 @@ class MessageDatabase:
 
     def cursor(self, request):
         return request.database_connection.cursor()
-        
             
-    def execute(self, request, statement, *args):
+    def query(self, request, sql, *args):
         cursor = self.cursor(request)
         
         try:
-            cursor.execute(statement, args)
+            cursor.execute(sql, args)
             return cursor.fetchall()
         finally:
             cursor.close()
 
+    def get(self, request, cls, id):
+        sql = "select * from {} where id = ?".format(cls.table)
+
+        cursor = self.cursor(request)
+
+        try:
+            cursor.execute(sql, [id])
+            record = cursor.fetchone()
+        finally:
+            cursor.close()
+
+        if record is None:
+            raise Exception("Not found!")
+
+        return cls.from_database_record(record)
+
 class Message:
+    table = "messages"
+    
     fields = [
         "id",
         "in_reply_to_id",
@@ -375,19 +394,6 @@ class Message:
             setattr(message, name, value)
 
         return message
-
-    @classmethod
-    def for_id(cls, cursor, id_):
-        sql = "select * from messages where id = ?"
-
-        cursor.execute(sql, [id_])
-
-        record = cursor.fetchone()
-
-        if record is None:
-            return
-
-        return Message.from_database_record(record)
 
     @property
     def name(self):
