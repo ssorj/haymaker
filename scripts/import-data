@@ -50,7 +50,7 @@ def import_mbox(cursor, path):
 database_file = "data/data.sqlite"
 
 database = MessageDatabase(database_file)
-database.init()
+database.create_schema()
 
 conn = sqlite3.connect(database_file)
 cursor = conn.cursor()
@@ -59,7 +59,8 @@ try:
     for name in list_dir("data", "*.mbox"):
         import_mbox(cursor, join("data", name))
 finally:
-    cursor.close()
     conn.close()
+
+database.optimize()
 
 # select from_, count(id) from messages group by from_ having count(id) > 50 order by count(id);

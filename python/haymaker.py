@@ -35,51 +35,99 @@ class Application(BrbnApplication):
     def __init__(self, home_dir):
         super().__init__(home_dir)
 
+        path = _os.path.join(self.home_dir, "data", "data.sqlite")
+        self.database = MessageDatabase(path)
+        
         title = "Haymaker"
         href = "/index.html"
-        self.message_index = Page(self, None, title, href)
+        self.index = Page(self, None, "index", title, href)
 
         title = "Message '{}'"
         href = "/message.html?id={}"
-        self.message_view = Page(self, self.message_index, title, href)
+        self.message = Page(self, self.index, "message", title, href)
+
+        title = "Search"
+        href = "/search.html?query={}"
+        self.search = Page(self, self.index, "search", title, href)
     
     def receive_request(self, request):
-        path = _os.path.join(self.home_dir, "data", "data.sqlite")
-        request.database_connection = _sqlite.connect(path)
-
+        request.database_connection = self.database.connect()
+ 
         try:
-            return self.do_receive_request(request)
+            return self.dispatch_request(request)
         finally:
             request.database_connection.close()
 
         return request.respond_not_found()
 
-    def do_receive_request(self, request):
+    def dispatch_request(self, request):
         if request.path_info in ("/", "/index.html"):
-            return self.send_message_index(request)
+            return self.send_index(request)
 
         if request.path_info == "/message.html":
-            return self.send_message_view(request)
+            return self.send_message(request)
+
+        if request.path_info == "/search.html":
+            return self.send_search(request)
         
         return self.send_file(request)
 
-    def send_message_index(self, request):
-        cursor = request.database_connection.cursor()
+    def send_index(self, request):
+        sql = "select distinct(from_address) from messages"
+        records = self.database.execute(request, sql)
 
+        values = {
+            "users": "",
+            "months": "",
+        }
+        
+        return self.index.respond(request, None, values)
+        
+    def send_message(self, request):
+        id = request.parameters["id"][0]
+
+        cursor = self.database.cursor(request)
+        message = Message.for_id(cursor, id)
+
+        # XXX message = self.database.load(request, Message, id)
+
+        if message is None:
+            return request.respond_not_found()
+
+        referenced = Message.for_id(cursor, message.in_reply_to_id)
+        in_reply_to_link = ""
+        
+        if referenced is not None:
+            href = self.message.get_href(referenced)
+            in_reply_to_link = html_a(xml_escape(referenced.id), href)
+
+        from_field = "{} <{}>".format(message.from_name, message.from_address)
+            
+        values = {
+            "id": xml_escape(message.id),
+            "in_reply_to_link": in_reply_to_link,
+            "list_id": xml_escape(message.list_id),
+            "from": xml_escape(from_field),
+            "date": xml_escape(_email.formatdate(message.date)),
+            "subject": xml_escape(message.subject),
+            "message_content": xml_escape(message.content),
+        }
+
+        return self.message.respond(request, message, values)
+
+    def send_search(self, request):
         query = request.parameters.get("query", [""])[0]
 
-        sql = "select * from messages where id in "
-        sql += "(select id from messages_fts where messages_fts match ?) "
-        sql += "order by date desc limit 1000"
-        
-        cursor.execute(sql, [query])
+        sql = ("select * from messages where id in "
+               "(select id from messages_fts where messages_fts match ?) "
+               "order by date desc limit 1000")
 
-        records = cursor.fetchall()
+        records = self.database.execute(request, sql, query)
         rows = list()
 
         for record in records:
             message = Message.from_database_record(record)
-            message_href = self.message_view.href.format(url_escape(message.id))
+            message_href = self.message.get_href(message)
             
             cols = [
                 html_a(xml_escape(message.subject), message_href),
@@ -90,72 +138,80 @@ class Application(BrbnApplication):
 
             rows.append(cols)
 
-        fields = html_ul(Message.fields, class_="four-column")
-        messages = html_table(rows, False, class_="messages")
-        body = _strings["message_index"].format(**locals())
-        content = self.message_index.render(None, None, body)
-
-        return request.respond_ok(content, "text/html")
-
-    def send_message_view(self, request):
-        id = request.parameters["id"][0]
-
-        cursor = request.database_connection.cursor()
-        message = Message.for_id(cursor, id)
-
-        if message is None:
-            return request.respond_not_found()
-
-        rmessage = Message.for_id(cursor, message.in_reply_to_id)
-        in_reply_to_link = ""
-        
-        if rmessage is not None:
-            href = self.message_view.href.format(rmessage.id)
-            in_reply_to_link = html_a(rmessage.id, href)
+        #fields = html_ul(Message.fields, class_="four-column")
 
         values = {
-            "id": xml_escape(message.id),
-            "in_reply_to_link": in_reply_to_link,
-            "list_id": xml_escape(message.list_id),
-            "from": xml_escape("{} <{}>".format(message.from_name, message.from_address)),
-            "date": xml_escape(_email.formatdate(message.date)),
-            "subject": xml_escape(message.subject),
-            "message_content": xml_escape(message.content),
+            "query": xml_escape(query),
+            "messages": html_table(rows, False, class_="messages"),
         }
-        
-        body = _strings["message_view"].format(**values)
-        content = self.message_view.render(message.subject, message.id, body)
 
-        return request.respond_ok(content, "text/html")
-
+        return self.search.respond(request, None, values)
+    
 class Page:
-    def __init__(self, app, parent, title, href):
+    def __init__(self, app, parent, template, title, href):
         self.app = app
         self.parent = parent
+        self.template = template
         self.title = title
         self.href = href
-    
-    def render(self, object_name, object_id, body):
-        title = self.title.format(xml_escape(object_name))
-        href = self.href.format(object_id)
 
-        items = list()
+    def get_title(self, obj=None):
+        if obj is None:
+            return self.title
+
+        return self.title.format(xml_escape(obj.name))
         
-        if self.parent is not None:
-            items.append((self.parent.title, self.parent.href))
+    def get_href(self, obj=None):
+        if obj is None:
+            return self.href
+
+        return self.href.format(obj.id)
         
-        items.append((title, href))
+    def render_link(self, obj=None):
+        title = self.get_title(obj)
+        href = self.get_href(obj)
 
-        links = [html_a(text, href) for text, href in items]
-        path_navigation = html_ul(links, id="-path-navigation")
+        return html_a(title, href)
+        
+    def render(self, content, obj=None):
+        links = list()
+        page = self
+        obj = obj
 
-        return _strings["page_template"].format(**locals())
+        while page is not None:
+            links.append(page.render_link(obj))
+
+            page = page.parent
+
+            if obj is not None:
+                obj = obj.parent
+
+        links.reverse()
+
+        values = {
+            "title": self.get_title(obj),
+            "path_navigation": html_ul(links, id="-path-navigation"),
+            "content": content,
+        }
+
+        return _strings["page"].format(**values)
+
+    def respond(self, request, obj=None, values={}):
+        content = _strings[self.template]
+        content = content.format(**values)
+        content = self.render(content, obj)
+
+        return request.respond_ok(content, "text/html")
 
 class MessageDatabase:
     def __init__(self, path):
         self.path = path
 
-    def init(self):
+    def connect(self):
+        # XXX thread local connections
+        return _sqlite.connect(self.path)
+
+    def create_schema(self):
         columns = list()
 
         for name in Message.fields:
@@ -179,19 +235,43 @@ class MessageDatabase:
         statements.append(ddl)
 
         columns = ", ".join(Message.fts_fields)
-        ddl = "create virtual table messages_fts"
-        ddl = "{} using fts4 ({}, notindexed=id)".format(ddl, columns)
+        ddl = ("create virtual table messages_fts "
+               "using fts4 ({}, notindexed=id)".format(columns))
         statements.append(ddl)
-        
-        conn = _sqlite.connect(self.path)
+
+        conn = self.connect()
         cursor = conn.cursor()
 
         try:
             for statement in statements:
                 cursor.execute(statement)
         finally:
-            cursor.close()
             conn.close()
+
+    def optimize(self):
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        ddl = "insert into messages_fts (messages_fts)"
+        ddl = "{} values ('optimize')".format(ddl)
+
+        try:
+            cursor.execute(ddl)
+        finally:
+            conn.close()
+
+    def cursor(self, request):
+        return request.database_connection.cursor()
+        
+            
+    def execute(self, request, statement, *args):
+        cursor = self.cursor(request)
+        
+        try:
+            cursor.execute(statement, args)
+            return cursor.fetchall()
+        finally:
+            cursor.close()
 
 class Message:
     fields = [
@@ -227,6 +307,8 @@ class Message:
     ]
     
     def __init__(self):
+        self.parent = None
+        
         for name in self.fields:
             setattr(self, name, None)
 
@@ -306,6 +388,10 @@ class Message:
             return
 
         return Message.from_database_record(record)
+
+    @property
+    def name(self):
+        return self.subject
     
     def save(self, cursor):
         columns = ", ".join(self.fields)
