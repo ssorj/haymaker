@@ -37,24 +37,30 @@ Search and browse Qpid mailing list content.
   <input name="query" autofocus="autofocus"/>
 </form>
 
-<h2>Messages by user</h2>
+<h2>Messages by sender</h2>
 
-{users}
+<p>The senders listed here are those with at least 100 messages.
+<!-- See <a href="">all senders</a>. --></p>
 
-<h2>Messages by month</h2>
+{senders}
+
+<!-- <h2>Messages by month</h2>
 
 {months}
+
+-->
 
 [message]
 <h1>{subject}</h1>
 
-<code>Id:              {id}</code><br/>
-<code>In-Reply-To-Id:  {in_reply_to_link}</code><br/>
-<code>List-Id:         {list_id}</code><br/>
-
-<code>From:            {from}</code><br/>
-<code>Date:            {date}</code><br/>
-<code>Subject:         {subject}</code><br/>
+<table class="headers">
+  <tr><td>Id</td><td>{id}</td></tr>
+  <tr><td>In-Reply-To-Id</td><td>{in_reply_to_link}</td></tr>
+  <tr><td>List-Id</td><td>{list_id}</td></tr>
+  <tr><td>From</td><td>{from}</td></tr>
+  <tr><td>Date</td><td>{date}</td></tr>
+  <tr><td>Subject</td><td>{subject}</td></tr>
+</table>
 
 <pre>{message_content}</pre>
 
@@ -65,6 +71,9 @@ Search and browse Qpid mailing list content.
   <input name="query" value="{query}" autofocus="autofocus"/>
 </form>
 
+{messages}
 
+[sender]
+<h1>{address}</h1>
 
 {messages}

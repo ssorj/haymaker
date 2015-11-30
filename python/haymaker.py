@@ -35,6 +35,10 @@ class Application(BrbnApplication):
     def __init__(self, home_dir):
         super().__init__(home_dir)
 
+        add_logged_module("haymaker")
+
+        setup_console_logging("info")
+        
         path = _os.path.join(self.home_dir, "data", "data.sqlite")
         self.database = MessageDatabase(path)
         
@@ -49,6 +53,10 @@ class Application(BrbnApplication):
         title = "Search"
         href = "/search.html?query={}"
         self.search = Page(self, self.index, "search", title, href)
+
+        title = "Sender '{}'"
+        href = "/sender.html?id={}"
+        self.sender = Page(self, self.index, "sender", title, href)
     
     def receive_request(self, request):
         request.database_connection = self.database.connect()
@@ -69,18 +77,30 @@ class Application(BrbnApplication):
 
         if request.path_info == "/search.html":
             return self.send_search(request)
+
+        if request.path_info == "/sender.html":
+            return self.send_sender(request)
         
         return self.send_file(request)
 
     def send_index(self, request):
-        sql = "select distinct(from_address) from messages"
-        records = self.database.query(request, sql)
+        sql = ("select from_address from messages "
+               "group by from_address having count(id) > 100 "
+               "order by from_address collate nocase")
 
-        items = [x[0] for x in records]
-        users = html_ul(items)
+        records = self.database.query(request, sql)
+        items = list()
+
+        for record in records:
+            address = record[0]
+            href = "/sender.html?id={}".format(address)
+
+            items.append(html_a(address, href))
+
+        senders = html_ul(items, class_="three-column")
         
         values = {
-            "users": users,
+            "senders": senders,
             "months": "",
         }
         
@@ -89,19 +109,24 @@ class Application(BrbnApplication):
     def send_message(self, request):
         id = request.parameters["id"][0]
 
-        message = self.database.get(request, Message, id)
-
-        # XXX message = self.database.get(request, Message, id)
-
-        if message is None:
+        try:
+            message = self.database.get(request, Message, id)
+        except Exception as e: # XXX
             return request.respond_not_found()
+            
+        in_reply_to = None
+        in_reply_to_id = message.in_reply_to_id
+        in_reply_to_link = in_reply_to_id
 
-        referenced = self.database.get(request, Message, message.in_reply_to_id)
-        in_reply_to_link = ""
-        
-        if referenced is not None:
-            href = self.message.get_href(referenced)
-            in_reply_to_link = html_a(xml_escape(referenced.id), href)
+        if in_reply_to_id is not None:
+            try:
+                in_reply_to = self.database.get(request, Message, in_reply_to_id)
+            except Exception as e: # XXX
+                pass
+
+            if in_reply_to is not None:
+                href = self.message.get_href(in_reply_to)
+                in_reply_to_link = html_a(xml_escape(in_reply_to_id), href)
 
         from_field = "{} <{}>".format(message.from_name, message.from_address)
             
@@ -140,14 +165,41 @@ class Application(BrbnApplication):
 
             rows.append(cols)
 
-        #fields = html_ul(Message.fields, class_="four-column")
-
         values = {
             "query": xml_escape(query),
-            "messages": html_table(rows, False, class_="messages"),
+            "messages": html_table(rows, False, class_="messages four"),
         }
 
         return self.search.respond(request, None, values)
+
+    def send_sender(self, request):
+        address = request.parameters["id"][0]
+        obj = Object(address, address)
+
+        sql = ("select * from messages where from_address = ? "
+               "order by date desc limit 1000")
+
+        records = self.database.query(request, sql, address)
+        rows = list()
+
+        for record in records:
+            message = Message.from_database_record(record)
+            message_href = self.message.get_href(message)
+            
+            cols = [
+                html_a(xml_escape(message.subject), message_href),
+                message.authored_lines,
+                xml_escape(str(_email.formatdate(message.date)[:-6])),
+            ]
+
+            rows.append(cols)
+
+        values = {
+            "address": xml_escape(address),
+            "messages": html_table(rows, False, class_="messages"),
+        }
+
+        return self.sender.respond(request, obj, values)
     
 class Page:
     def __init__(self, app, parent, template, title, href):
@@ -167,7 +219,7 @@ class Page:
         if obj is None:
             return self.href
 
-        return self.href.format(obj.id)
+        return self.href.format(url_escape(obj.id))
         
     def render_link(self, obj=None):
         title = self.get_title(obj)
@@ -176,6 +228,8 @@ class Page:
         return html_a(title, href)
         
     def render(self, content, obj=None):
+        title = self.get_title(obj)
+        
         links = list()
         page = self
         obj = obj
@@ -191,7 +245,7 @@ class Page:
         links.reverse()
 
         values = {
-            "title": self.get_title(obj),
+            "title": title,
             "path_navigation": html_ul(links, id="-path-navigation"),
             "content": content,
         }
@@ -275,8 +329,12 @@ class MessageDatabase:
             cursor.close()
 
     def get(self, request, cls, id):
+        _log.debug("Getting {} with ID {}".format(cls.__name__, id))
+        
+        assert issubclass(cls, DatabaseObject), cls
+        assert id is not None
+        
         sql = "select * from {} where id = ?".format(cls.table)
-
         cursor = self.cursor(request)
 
         try:
@@ -290,7 +348,23 @@ class MessageDatabase:
 
         return cls.from_database_record(record)
 
-class Message:
+class Object:
+    def __init__(self, id, name, parent=None):
+        self.id = id
+        self._name = name
+        self.parent = parent
+
+    @property
+    def name(self):
+        return self._name
+    
+    def __repr__(self):
+        return format_repr(self, self.id)
+
+class DatabaseObject(Object):
+    table = None
+    
+class Message(DatabaseObject):
     table = "messages"
     
     fields = [
@@ -326,7 +400,7 @@ class Message:
     ]
     
     def __init__(self):
-        self.parent = None
+        super().__init__(None, None)
         
         for name in self.fields:
             setattr(self, name, None)
@@ -415,6 +489,3 @@ class Message:
         dml = "insert into messages_fts ({}) values ({})".format(columns, values)
 
         cursor.execute(dml, args)
-        
-    def __repr__(self):
-        return format_repr(self, self.id)

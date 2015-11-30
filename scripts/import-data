@@ -62,5 +62,3 @@ finally:
     conn.close()
 
 database.optimize()
-
-# select from_, count(id) from messages group by from_ having count(id) > 50 order by count(id);

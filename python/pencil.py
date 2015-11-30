@@ -22,6 +22,8 @@ import re as _re
 import time as _time
 
 from pprint import pformat as _pformat
+from urllib.parse import quote_plus as _url_escape
+from urllib.parse import unquote_plus as _url_unescape
 from xml.sax.saxutils import escape as _xml_escape
 from xml.sax.saxutils import unescape as _xml_unescape
 
@@ -181,6 +183,18 @@ class StringCatalog(dict):
         return format_repr(self, self.path)
 
 # HTML functions
+
+def url_escape(string):
+    if string is None:
+        return
+
+    return _url_escape(string)
+
+def url_unescape(string):
+    if string is None:
+        return
+
+    return _url_unescape(string)
 
 _extra_entities = {
     '"': "&quot;",
