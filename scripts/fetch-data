@@ -37,6 +37,12 @@ with Session() as session:
         start_year, start_month = start_dates[i]
         today = date.today()
 
+        # Remove the latest mbox file; it may be partial
+        # XXX Should remove latest *two*
+        
+        file_name = "{}-{}{:02}.mbox".format(list_name, today.year, today.month)
+        remove(join("data", file_name))
+        
         for year in range(start_year, today.year + 1):
             print("#", list_name, year)
 

@@ -20,14 +20,12 @@
 
 from __future__ import print_function
 
-import sqlite3
-
 from haymaker import *
 from plano import *
 from mailbox import mbox
 
-def import_mbox(cursor, path):
-    mb = mbox(path)
+def import_mbox(cursor, mbox_path, text_file):
+    mb = mbox(mbox_path)
     
     for mbox_message in mb.values():
         message = Message.from_mbox_message(mbox_message)
@@ -45,6 +43,12 @@ def import_mbox(cursor, path):
         
         message.save(cursor)
 
+        text_file.write("========")
+        text_file.write(message.subject)
+        text_file.write("\n\n")
+        text_file.write(message.authored_content)
+        text_file.write("\n\n")
+        
         cursor.connection.commit()
 
 database_file = "data/data.sqlite"
@@ -52,13 +56,14 @@ database_file = "data/data.sqlite"
 database = MessageDatabase(database_file)
 database.create_schema()
 
-conn = sqlite3.connect(database_file)
+conn = database.connect()
 cursor = conn.cursor()
 
-try:
-    for name in list_dir("data", "*.mbox"):
-        import_mbox(cursor, join("data", name))
-finally:
-    conn.close()
+with open("data/data.text", "w") as text_file:
+    try:
+        for name in list_dir("data", "*.mbox"):
+            import_mbox(cursor, join("data", name), text_file)
+    finally:
+        conn.close()
 
 database.optimize()

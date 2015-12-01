@@ -351,3 +351,7 @@ table.headers td {
 table.headers td:nth-child(1) {
     width: 10em;
 }
+
+span.quoted {
+    color: gray;
+}

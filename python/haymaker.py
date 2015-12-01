@@ -111,7 +111,7 @@ class Application(BrbnApplication):
 
         try:
             message = self.database.get(request, Message, id)
-        except Exception as e: # XXX
+        except ObjectNotFound as e:
             return request.respond_not_found()
             
         in_reply_to = None
@@ -121,7 +121,7 @@ class Application(BrbnApplication):
         if in_reply_to_id is not None:
             try:
                 in_reply_to = self.database.get(request, Message, in_reply_to_id)
-            except Exception as e: # XXX
+            except ObjectNotFound:
                 pass
 
             if in_reply_to is not None:
@@ -129,7 +129,24 @@ class Application(BrbnApplication):
                 in_reply_to_link = html_a(xml_escape(in_reply_to_id), href)
 
         from_field = "{} <{}>".format(message.from_name, message.from_address)
-            
+
+        content = ""
+        
+        if message.content is not None:
+            lines = list()
+        
+            for line in message.content.splitlines():
+                line = line.strip()
+
+                if line.startswith(">"):
+                    line = html_span(xml_escape(line), class_="quoted")
+                else:
+                    line = xml_escape(line)
+                    
+                lines.append(line)
+
+            content = "\n".join(lines)
+        
         values = {
             "id": xml_escape(message.id),
             "in_reply_to_link": in_reply_to_link,
@@ -137,7 +154,7 @@ class Application(BrbnApplication):
             "from": xml_escape(from_field),
             "date": xml_escape(_email.formatdate(message.date)),
             "subject": xml_escape(message.subject),
-            "message_content": xml_escape(message.content),
+            "message_content": content,
         }
 
         return self.message.respond(request, message, values)
@@ -159,7 +176,7 @@ class Application(BrbnApplication):
             cols = [
                 html_a(xml_escape(message.subject), message_href),
                 xml_escape(message.from_address),
-                message.authored_lines,
+                message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
             ]
 
@@ -188,7 +205,7 @@ class Application(BrbnApplication):
             
             cols = [
                 html_a(xml_escape(message.subject), message_href),
-                message.authored_lines,
+                message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
             ]
 
@@ -344,10 +361,13 @@ class MessageDatabase:
             cursor.close()
 
         if record is None:
-            raise Exception("Not found!")
+            raise ObjectNotFound()
 
         return cls.from_database_record(record)
 
+class ObjectNotFound(Exception):
+    pass
+    
 class Object:
     def __init__(self, id, name, parent=None):
         self.id = id
@@ -377,12 +397,13 @@ class Message(DatabaseObject):
         "subject",
         "content_type",
         "content",
-        "authored_lines",
+        "authored_content",
+        "authored_words",
     ]
 
     field_types = {
         "date": int,
-        "authored_lines": int,
+        "authored_words": int,
     }
 
     field_mbox_keys = {
@@ -396,7 +417,7 @@ class Message(DatabaseObject):
     fts_fields = [
         "id",
         "subject",
-        "content",
+        "authored_content",
     ]
     
     def __init__(self):
@@ -436,7 +457,7 @@ class Message(DatabaseObject):
         elif mbox_message.get_content_type() == "text/plain":
             message.content = mbox_message.get_payload()
 
-        count = 0
+        lines = list()
 
         if message.content is not None:
             for line in message.content.splitlines():
@@ -445,13 +466,11 @@ class Message(DatabaseObject):
                 if line.startswith(">"):
                     continue
 
-                if line == "":
-                    continue
+                lines.append(line)
 
-                count += 1
+        message.authored_content = "\n".join(lines)
+        message.authored_words = len(message.authored_content.split())
 
-        message.authored_lines = count
-            
         return message
 
     @classmethod
