@@ -663,11 +663,6 @@ class Message(DatabaseObject):
         
         content = cls._get_mbox_content(mbox_message)
 
-        if mbox_message.get("Content-Transfer-Encoding") == "quoted-printable":
-            print("!!!")
-            content = _quopri.decodestring(content)
-            content = content.decode("utf-8", errors="replace")
-
         assert content is not None
         
         lines = list()
@@ -689,20 +684,27 @@ class Message(DatabaseObject):
     @classmethod
     def _get_mbox_content(cls, mbox_message):
         content_type = None
+        content_encoding = None
         content = None
         
         if mbox_message.is_multipart():
             for part in mbox_message.walk():
                 if part.get_content_type() == "text/plain":
                     content_type = "text/plain"
+                    content_encoding = part["Content-Transfer-Encoding"]
                     content = part.get_payload()
 
         if content_type is None:
             content_type = mbox_message.get_content_type()
+            content_encoding = mbox_message["Content-Transfer-Encoding"]
             content = mbox_message.get_payload()
 
         assert content_type is not None
         assert content is not None
+
+        if content_encoding == "quoted-printable":
+            content = _quopri.decodestring(content)
+            content = content.decode("utf-8", errors="replace")
 
         if content_type == "text/html":
             content = strip_tags(content)
