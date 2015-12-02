@@ -17,10 +17,13 @@
 # under the License.
 #
 
+import email.utils as _email
 import os as _os
+import quopri as _quopri
+import re as _re
 import sqlite3 as _sqlite
 import time as _time
-import email.utils as _email
+import textwrap as _textwrap
 
 from datetime import datetime as _datetime
 
@@ -30,6 +33,200 @@ from pencil import *
 
 _log = logger("haymaker")
 _strings = StringCatalog(__file__)
+
+_topics = [
+    "acknowledgement",
+    "access control",
+    "acl",
+    "activemq",
+    "address",
+    "alternate exchange",
+    "amqp 0-10",
+    "amqp 1.0",
+    "amqp",
+    "apache",
+    "api reference",
+    "api",
+    "at least once delivery",
+    "authentication",
+    "binding",
+    "broker",
+    "c++ broker",
+    "c++ client",
+    "c++",
+    "celery",
+    "celluloid",
+    "centos",
+    "certificate",
+    "cli",
+    "client certificate",
+    "client server",
+    "client side persistence",
+    "client",
+    "clr",
+    "cluster",
+    "cmake",
+    "codec",
+    "command",
+    "committer",
+    "communication",
+    "compilation",
+    "compression",
+    "configuration",
+    "conformance",
+    "connection option",
+    "connection",
+    "consumer",
+    "credit",
+    "deadlock",
+    "debian",
+    "delayed delivery",
+    "delivery",
+    "destination",
+    "disconnected operation",
+    "discovery",
+    "dispatch",
+    "dlq",
+    "documentation",
+    "download",
+    "durable subscription",
+    "dynamic node",
+    "dynamic",
+    "endpoint",
+    "engine",
+    "exactly once delivery",
+    "example",
+    "exchange",
+    "failover",
+    "federation",
+    "fedora",
+    "flow control",
+    "go",
+    "gsoc",
+    "gssapi",
+    "ha",
+    "header",
+    "heartbeats",
+    "incubator",
+    "integration",
+    "interop",
+    "io",
+    "ipv6",
+    "java broker",
+    "java client",
+    "java",
+    "javascript",
+    "jca",
+    "jira",
+    "jms",
+    "jmx",
+    "jvm",
+    "kerberos",
+    "large message",
+    "last value queue",
+    "ldap",
+    "leak",
+    "library",
+    "link recovery",
+    "link",
+    "linux",
+    "listener",
+    "logging",
+    "mailing list",
+    "management",
+    "maven",
+    "memory",
+    "message body",
+    "message groups",
+    "message header",
+    "message",
+    "messaging api",
+    "messenger",
+    "mqtt",
+    "msg",
+    "net",
+    "node",
+    "openwire",
+    "os x",
+    "patch",
+    "peer to peer",
+    "performance",
+    "perl",
+    "perl",
+    "persistence",
+    "php",
+    "plugin",
+    "policy",
+    "priority queue",
+    "producer",
+    "profiling",
+    "project",
+    "protocol detection",
+    "protocol",
+    "proton",
+    "proton-c",
+    "proton-j",
+    "publish subscribe",
+    "python",
+    "qip",
+    "qmf",
+    "qpid-config",
+    "qpid-cpp",
+    "qpid::messaging",
+    "qpidc",
+    "qpidd",
+    "queue",
+    "rabbitmq",
+    "rdma",
+    "reactor",
+    "receiver",
+    "reconnect",
+    "release",
+    "request response",
+    "review",
+    "rhel",
+    "ring queue",
+    "router",
+    "ruby",
+    "rust",
+    "sasl",
+    "sctp",
+    "selectors",
+    "sender",
+    "serializable destination",
+    "server",
+    "session",
+    "settlement",
+    "shared subscription",
+    "solaris",
+    "ssl",
+    "stomp",
+    "store",
+    "subscription",
+    "subversion",
+    "svn",
+    "test failure",
+    "test",
+    "testing",
+    "thread",
+    "timeout",
+    "topic",
+    "transaction",
+    "transport",
+    "message ttl",
+    "ubuntu",
+    "udp",
+    "url",
+    "vert.x",
+    "visual studio",
+    "vote",
+    "web",
+    "website",
+    "websockets",
+    "wiki",
+    "windows",
+    "wiring",
+]
 
 class Application(BrbnApplication):
     def __init__(self, home_dir):
@@ -95,13 +292,21 @@ class Application(BrbnApplication):
             address = record[0]
             href = "/sender.html?id={}".format(address)
 
-            items.append(html_a(address, href))
+            items.append(html_a(xml_escape(address), href))
 
         senders = html_ul(items, class_="three-column")
+
+        items = list()
         
+        for topic in _topics:
+            href = "/search.html?query={}".format(url_escape(topic))
+            items.append(html_a(xml_escape(topic), href))
+
+        topics = html_ul(items, class_="four-column")
+                         
         values = {
             "senders": senders,
-            "months": "",
+            "topics": topics,
         }
         
         return self.index.respond(request, None, values)
@@ -139,8 +344,13 @@ class Application(BrbnApplication):
                 line = line.strip()
 
                 if line.startswith(">"):
+                    m = _re.match("^[> ]+", line)
+                    prefix = "\n{}".format(m.group(0))
+                    
+                    line = prefix.join(_textwrap.wrap(line, 80))
                     line = html_span(xml_escape(line), class_="quoted")
                 else:
+                    line = "\n".join(_textwrap.wrap(line, 80))
                     line = xml_escape(line)
                     
                 lines.append(line)
@@ -163,8 +373,9 @@ class Application(BrbnApplication):
         query = request.parameters.get("query", [""])[0]
 
         sql = ("select * from messages where id in "
-               "(select id from messages_fts where messages_fts match ?) "
-               "order by date desc limit 1000")
+               "(select id from messages_fts "
+               " where messages_fts match ? limit 1000)"
+               "order by date desc")
 
         records = self.database.query(request, sql, query)
         rows = list()
@@ -232,7 +443,7 @@ class Page:
 
         return self.title.format(xml_escape(obj.name))
         
-    def get_href(self, obj=None):
+    def get_href(self, obj=None, id=None):
         if obj is None:
             return self.href
 
@@ -308,8 +519,10 @@ class MessageDatabase:
         statements.append(ddl)
 
         columns = ", ".join(Message.fts_fields)
-        ddl = ("create virtual table messages_fts "
-               "using fts4 ({}, notindexed=id)".format(columns))
+        ddl = ("create virtual table messages_fts using fts4 "
+               "({}, notindexed=id, tokenize=porter)"
+               "".format(columns))
+               
         statements.append(ddl)
 
         conn = self.connect()
@@ -411,7 +624,7 @@ class Message(DatabaseObject):
         "in_reply_to_id": "In-Reply-To",
         "list_id": "List-Id",
         "subject": "Subject",
-        "content_type": "Content",
+        "content_type": "Content-Type",
     }
 
     fts_fields = [
@@ -448,31 +661,68 @@ class Message(DatabaseObject):
         tup = _email.parsedate(mbox_message["Date"])
         message.date = _time.mktime(tup)
         
-        if mbox_message.is_multipart():
-            for part in mbox_message.walk():
-                if part.get_content_type() == "text/plain":
-                    message.content = part.get_payload()
-                    break
-                    
-        elif mbox_message.get_content_type() == "text/plain":
-            message.content = mbox_message.get_payload()
+        content = cls._get_mbox_content(mbox_message)
 
+        if mbox_message.get("Content-Transfer-Encoding") == "quoted-printable":
+            print("!!!")
+            content = _quopri.decodestring(content)
+            content = content.decode("utf-8", errors="replace")
+
+        assert content is not None
+        
         lines = list()
 
-        if message.content is not None:
-            for line in message.content.splitlines():
-                line = line.strip()
+        for line in content.splitlines():
+            line = line.strip()
 
-                if line.startswith(">"):
-                    continue
+            if line.startswith(">"):
+                continue
 
-                lines.append(line)
+            lines.append(line)
 
+        message.content = content
         message.authored_content = "\n".join(lines)
         message.authored_words = len(message.authored_content.split())
 
         return message
 
+    @classmethod
+    def _get_mbox_content(cls, mbox_message):
+        content_type = None
+        content = None
+        
+        if mbox_message.is_multipart():
+            for part in mbox_message.walk():
+                if part.get_content_type() == "text/plain":
+                    content_type = "text/plain"
+                    content = part.get_payload()
+
+        if content_type is None:
+            content_type = mbox_message.get_content_type()
+            content = mbox_message.get_payload()
+
+        assert content_type is not None
+        assert content is not None
+
+        if content_type == "text/html":
+            content = strip_tags(content)
+        
+        return content
+
+    @classmethod
+    def _get_authored_content(cls, content):
+        lines = list()
+
+        for line in content.splitlines():
+            line = line.strip()
+
+            if line.startswith(">"):
+                continue
+
+            lines.append(line)
+
+        return "\n".join(lines)
+    
     @classmethod
     def from_database_record(cls, record):
         message = cls()

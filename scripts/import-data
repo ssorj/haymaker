@@ -43,11 +43,11 @@ def import_mbox(cursor, mbox_path, text_file):
         
         message.save(cursor)
 
-        text_file.write("========")
-        text_file.write(message.subject)
-        text_file.write("\n\n")
-        text_file.write(message.authored_content)
-        text_file.write("\n\n")
+        #text_file.write("========")
+        #text_file.write(message.subject)
+        #text_file.write("\n\n")
+        #text_file.write(message.authored_content)
+        #text_file.write("\n\n")
         
         cursor.connection.commit()
 

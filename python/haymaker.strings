@@ -44,11 +44,9 @@ Search and browse Qpid mailing list content.
 
 {senders}
 
-<!-- <h2>Messages by month</h2>
+<h2>Messages by topic</h2>
 
-{months}
-
--->
+{topics}
 
 [message]
 <h1>{subject}</h1>

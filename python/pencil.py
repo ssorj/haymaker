@@ -220,7 +220,7 @@ def strip_tags(string):
     if string is None:
         return
 
-    return re.sub(_strip_tags_regex, "", string)
+    return _re.sub(_strip_tags_regex, "", string)
 
 def _html_elem(tag, content, attrs):
     attrs = _html_attrs(attrs)
