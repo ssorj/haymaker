@@ -54,6 +54,7 @@ Search and browse Qpid mailing list content.
 <table class="headers">
   <tr><td>Id</td><td>{id}</td></tr>
   <tr><td>In-Reply-To-Id</td><td>{in_reply_to_link}</td></tr>
+  <tr><td>Thread-Id</td><td>{thread_link}</td></tr>
   <tr><td>List-Id</td><td>{list_id}</td></tr>
   <tr><td>From</td><td>{from}</td></tr>
   <tr><td>Date</td><td>{date}</td></tr>
@@ -73,5 +74,10 @@ Search and browse Qpid mailing list content.
 
 [sender]
 <h1>{address}</h1>
+
+{messages}
+
+[thread]
+<h1>{subject}</h1>
 
 {messages}

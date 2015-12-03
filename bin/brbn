@@ -78,7 +78,11 @@ def main():
     port = config["port"]
     
     server = HTTPServer(WSGIContainer(app))
-    server.listen(port)
+
+    try:
+        server.listen(port)
+    except OSError as e:
+        sys.exit(str(e))
 
     _log.info("Listening on port {}".format(port))
     

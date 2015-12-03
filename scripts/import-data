@@ -24,46 +24,75 @@ from haymaker import *
 from plano import *
 from mailbox import mbox
 
-def import_mbox(cursor, mbox_path, text_file):
-    mb = mbox(mbox_path)
+in_reply_to_ids_by_id = dict()
+
+def import_message_ids(mbox_file):
+    notice("Importing message IDs from {}", mbox_file)
+
+    mb = mbox(mbox_file)
+
+    for mbox_message in mb.values():
+        id = mbox_message["Message-ID"]
+        in_reply_to_id = mbox_message["In-Reply-To"]
+
+        in_reply_to_ids_by_id[id] = in_reply_to_id
+
+def import_messages(cursor, mbox_file):
+    notice("Importing messages from {}", mbox_file)
+    
+    mb = mbox(mbox_file)
     
     for mbox_message in mb.values():
+        from_header = mbox_message["From"]
+        
+        if from_header.endswith("<jira@apache.org>"):
+            continue
+        
+        if from_header.endswith("<qpid-dev@incubator.apache.org>"):
+            continue
+        
+        if from_header.endswith("<git@git.apache.org>"):
+            continue
+
         message = Message.from_mbox_message(mbox_message)
 
-        if message.from_address == "jira@apache.org":
-            continue
-        
-        if message.from_address == "qpid-dev@incubator.apache.org":
-            continue
-        
-        if message.from_address == "git@git.apache.org":
-            continue
+        in_reply_to_ids_by_id[message.id] = message.in_reply_to_id
 
-        print(message)
+        message.thread_id = find_thread_id(message)
+
+        # print(message, message.thread_id)
         
         message.save(cursor)
 
-        #text_file.write("========")
-        #text_file.write(message.subject)
-        #text_file.write("\n\n")
-        #text_file.write(message.authored_content)
-        #text_file.write("\n\n")
-        
         cursor.connection.commit()
 
-database_file = "data/data.sqlite"
+def find_thread_id(message):
+    id = message.id
+    in_reply_to_id = message.in_reply_to_id
 
-database = MessageDatabase(database_file)
+    while True:
+        if in_reply_to_id is None:
+            return id
+
+        id = in_reply_to_id
+        in_reply_to_id = in_reply_to_ids_by_id.get(id)
+
+database = MessageDatabase("data/data.sqlite")
+
+for name in list_dir("data", "*.mbox"):
+    mbox_file = join("data", name)
+    import_message_ids(mbox_file)
+
 database.create_schema()
 
 conn = database.connect()
 cursor = conn.cursor()
 
-with open("data/data.text", "w") as text_file:
-    try:
-        for name in list_dir("data", "*.mbox"):
-            import_mbox(cursor, join("data", name), text_file)
-    finally:
-        conn.close()
+try:
+    for name in list_dir("data", "*.mbox"):
+        mbox_file = join("data", name)
+        import_messages(cursor, mbox_file)
+finally:
+    conn.close()
 
 database.optimize()

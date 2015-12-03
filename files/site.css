@@ -59,6 +59,7 @@ pre {
 h1,
 h2 {
     font-weight: 400;
+    line-height: 1.1em;
 }
 
 h1 a,

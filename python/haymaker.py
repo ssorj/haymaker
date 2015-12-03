@@ -83,7 +83,6 @@ _topics = [
     "delayed delivery",
     "delivery",
     "destination",
-    "disconnected operation",
     "discovery",
     "dispatch",
     "dlq",
@@ -254,6 +253,10 @@ class Application(BrbnApplication):
         title = "Sender '{}'"
         href = "/sender.html?id={}"
         self.sender = Page(self, self.index, "sender", title, href)
+
+        title = "Thread '{}'"
+        href = "/thread.html?id={}"
+        self.thread = Page(self, self.index, "thread", title, href)
     
     def receive_request(self, request):
         request.database_connection = self.database.connect()
@@ -277,6 +280,9 @@ class Application(BrbnApplication):
 
         if request.path_info == "/sender.html":
             return self.send_sender(request)
+
+        if request.path_info == "/thread.html":
+            return self.send_thread(request)
         
         return self.send_file(request)
 
@@ -333,6 +339,20 @@ class Application(BrbnApplication):
                 href = self.message.get_href(in_reply_to)
                 in_reply_to_link = html_a(xml_escape(in_reply_to_id), href)
 
+        thread = None
+        thread_id = message.thread_id
+        thread_link = thread_id
+
+        if thread_id is not None:
+            try:
+                thread = self.database.get(request, Message, thread_id)
+            except ObjectNotFound:
+                pass
+
+            if thread is not None:
+                href = self.thread.get_href(thread)
+                thread_link = html_a(xml_escape(thread_id), href)
+
         from_field = "{} <{}>".format(message.from_name, message.from_address)
 
         content = ""
@@ -360,6 +380,7 @@ class Application(BrbnApplication):
         values = {
             "id": xml_escape(message.id),
             "in_reply_to_link": in_reply_to_link,
+            "thread_link": thread_link,
             "list_id": xml_escape(message.list_id),
             "from": xml_escape(from_field),
             "date": xml_escape(_email.formatdate(message.date)),
@@ -429,6 +450,41 @@ class Application(BrbnApplication):
 
         return self.sender.respond(request, obj, values)
     
+    def send_thread(self, request):
+        id = request.parameters.get("id", [""])[0]
+
+        try:
+            head = self.database.get(request, Message, id)
+        except ObjectNotFound as e:
+            return request.respond_not_found()
+            
+        sql = ("select * from messages "
+               "where thread_id = ? "
+               "order by date asc limit 1000")
+
+        records = self.database.query(request, sql, id)
+        rows = list()
+
+        for record in records:
+            message = Message.from_database_record(record)
+            message_href = self.message.get_href(message)
+            
+            cols = [
+                html_a(xml_escape(message.subject), message_href),
+                xml_escape(message.from_address),
+                message.authored_words,
+                xml_escape(str(_email.formatdate(message.date)[:-6])),
+            ]
+
+            rows.append(cols)
+
+        values = {
+            "subject": xml_escape(head.subject),
+            "messages": html_table(rows, False, class_="messages four"),
+        }
+
+        return self.thread.respond(request, head, values)
+
 class Page:
     def __init__(self, app, parent, template, title, href):
         self.app = app
@@ -612,6 +668,7 @@ class Message(DatabaseObject):
         "content",
         "authored_content",
         "authored_words",
+        "thread_id",
     ]
 
     field_types = {
@@ -664,21 +721,11 @@ class Message(DatabaseObject):
         content = cls._get_mbox_content(mbox_message)
 
         assert content is not None
-        
-        lines = list()
-
-        for line in content.splitlines():
-            line = line.strip()
-
-            if line.startswith(">"):
-                continue
-
-            lines.append(line)
 
         message.content = content
-        message.authored_content = "\n".join(lines)
+        message.authored_content = cls._get_authored_content(message.content)
         message.authored_words = len(message.authored_content.split())
-
+        
         return message
 
     @classmethod
