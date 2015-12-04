@@ -278,23 +278,23 @@ class Application(BrbnApplication):
         
         title = "Haymaker"
         href = "/index.html"
-        self.index = Page(self, None, "index", title, href)
+        self.index_page = Page(self, None, "index", title, href)
 
         title = "Message '{}'"
         href = "/message.html?id={}"
-        self.message = Page(self, self.index, "message", title, href)
+        self.message_page = Page(self, self.index_page, "message", title, href)
 
         title = "Search"
         href = "/search.html?query={}"
-        self.search = Page(self, self.index, "search", title, href)
+        self.search_page = Page(self, self.index_page, "search", title, href)
 
         title = "Sender '{}'"
         href = "/sender.html?id={}"
-        self.sender = Page(self, self.index, "sender", title, href)
+        self.sender_page = Page(self, self.index_page, "sender", title, href)
 
         title = "Thread '{}'"
         href = "/thread.html?id={}"
-        self.thread = Page(self, self.index, "thread", title, href)
+        self.thread_page = Page(self, self.index_page, "thread", title, href)
     
     def receive_request(self, request):
         request.database_connection = self.database.connect()
@@ -353,7 +353,7 @@ class Application(BrbnApplication):
             "topics": topics,
         }
         
-        return self.index.respond(request, None, values)
+        return self.index_page.respond(request, None, values)
         
     def send_message(self, request):
         id = request.parameters["id"][0]
@@ -374,8 +374,7 @@ class Application(BrbnApplication):
                 pass
 
             if in_reply_to is not None:
-                href = self.message.get_href(in_reply_to)
-                in_reply_to_link = html_a(xml_escape(in_reply_to_id), href)
+                in_reply_to_link = self.message_page.render_brief_link(in_reply_to)
 
         thread = None
         thread_id = message.thread_id
@@ -388,8 +387,7 @@ class Application(BrbnApplication):
                 pass
 
             if thread is not None:
-                href = self.thread.get_href(thread)
-                thread_link = html_a(xml_escape(thread_id), href)
+                thread_link = self.thread_page.render_brief_link(thread)
 
         from_field = "{} <{}>".format(message.from_name, message.from_address)
 
@@ -426,7 +424,7 @@ class Application(BrbnApplication):
             "message_content": content,
         }
 
-        return self.message.respond(request, message, values)
+        return self.message_page.respond(request, message, values)
 
     def send_search(self, request):
         query = request.parameters.get("query", [""])[0]
@@ -441,10 +439,10 @@ class Application(BrbnApplication):
 
         for record in records:
             message = Message.from_database_record(record)
-            message_href = self.message.get_href(message)
+            message_link = self.message_page.render_brief_link(message)
             
             cols = [
-                html_a(xml_escape(message.subject), message_href),
+                message_link,
                 xml_escape(message.from_address),
                 message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
@@ -457,7 +455,7 @@ class Application(BrbnApplication):
             "messages": html_table(rows, False, class_="messages four"),
         }
 
-        return self.search.respond(request, None, values)
+        return self.search_page.respond(request, None, values)
 
     def send_sender(self, request):
         address = request.parameters["id"][0]
@@ -471,10 +469,10 @@ class Application(BrbnApplication):
 
         for record in records:
             message = Message.from_database_record(record)
-            message_href = self.message.get_href(message)
+            message_link = self.message_page.render_brief_link(message)
             
             cols = [
-                html_a(xml_escape(message.subject), message_href),
+                message_link,
                 message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
             ]
@@ -486,7 +484,7 @@ class Application(BrbnApplication):
             "messages": html_table(rows, False, class_="messages"),
         }
 
-        return self.sender.respond(request, obj, values)
+        return self.sender_page.respond(request, obj, values)
     
     def send_thread(self, request):
         id = request.parameters.get("id", [""])[0]
@@ -505,10 +503,10 @@ class Application(BrbnApplication):
 
         for record in records:
             message = Message.from_database_record(record)
-            message_href = self.message.get_href(message)
+            message_link = self.message_page.render_brief_link(message)
             
             cols = [
-                html_a(xml_escape(message.subject), message_href),
+                message_link,
                 xml_escape(message.from_address),
                 message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
@@ -521,7 +519,7 @@ class Application(BrbnApplication):
             "messages": html_table(rows, False, class_="messages four"),
         }
 
-        return self.thread.respond(request, head, values)
+        return self.thread_page.respond(request, head, values)
 
 class Page:
     def __init__(self, app, parent, template, title, href):
@@ -536,7 +534,7 @@ class Page:
             return self.title
 
         return self.title.format(xml_escape(obj.name))
-        
+
     def get_href(self, obj=None, id=None):
         if obj is None:
             return self.href
@@ -544,10 +542,19 @@ class Page:
         return self.href.format(url_escape(obj.id))
         
     def render_link(self, obj=None):
-        title = self.get_title(obj)
+        text = self.get_title(obj)
         href = self.get_href(obj)
 
-        return html_a(title, href)
+        return html_a(text, href)
+
+    def render_brief_link(self, obj=None):
+        text = self.title
+        href = self.get_href(obj)
+
+        if obj is not None:
+            text = obj.name
+
+        return html_a(text, href)
         
     def render(self, content, obj=None):
         title = self.get_title(obj)
