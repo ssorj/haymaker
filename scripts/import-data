@@ -20,7 +20,7 @@
 
 from __future__ import print_function
 
-from haymaker import *
+from haystack import *
 from plano import *
 from mailbox import mbox
 
