@@ -32,7 +32,7 @@ from brbn import *
 from faller import *
 from pencil import *
 
-_log = logger("haymaker")
+_log = logger("haystack")
 _strings = StringCatalog(__file__)
 
 _topics = _json.loads(_strings["topics"])
@@ -41,14 +41,14 @@ class Application(BrbnApplication):
     def __init__(self, home_dir):
         super().__init__(home_dir)
 
-        add_logged_module("haymaker")
+        add_logged_module("haystack")
 
         setup_console_logging("info")
         
         path = _os.path.join(self.home_dir, "data", "data.sqlite")
         self.database = MessageDatabase(path)
         
-        title = "Haymaker"
+        title = "Haystack"
         href = "/index.html"
         self.index_page = Page(self, None, title, href, "index")
 

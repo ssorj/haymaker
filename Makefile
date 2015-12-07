@@ -1,9 +1,9 @@
-.PHONY: devel import
+.PHONY: devel import clean
 
 # python3-requests, python3-tornado
 
 devel:
-	haymaker
+	haystack
 
 import:
 	scripts/fetch-data

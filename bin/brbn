@@ -82,7 +82,7 @@ def main():
     try:
         server.listen(port)
     except OSError as e:
-        sys.exit(str(e))
+        exit(str(e))
 
     _log.info("Listening on port {}".format(port))
     
