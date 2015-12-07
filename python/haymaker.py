@@ -50,51 +50,33 @@ class Application(BrbnApplication):
         
         title = "Haymaker"
         href = "/index.html"
-        self.index_page = Page(self, None, "index", title, href)
+        self.index_page = Page(self, None, title, href, "index")
 
         title = "Message '{}'"
         href = "/message.html?id={}"
-        self.message_page = Page(self, self.index_page, "message", title, href)
+        self.message_page = Page(self, self.index_page, title, href, "message")
 
         title = "Search"
         href = "/search.html?query={}"
-        self.search_page = Page(self, self.index_page, "search", title, href)
+        self.search_page = Page(self, self.index_page, title, href, "search")
 
         title = "Sender '{}'"
         href = "/sender.html?id={}"
-        self.sender_page = Page(self, self.index_page, "sender", title, href)
+        self.sender_page = Page(self, self.index_page, title, href, "sender")
 
         title = "Thread '{}'"
         href = "/thread.html?id={}"
-        self.thread_page = Page(self, self.index_page, "thread", title, href)
+        self.thread_page = Page(self, self.index_page, title, href, "thread")
     
     def receive_request(self, request):
         request.database_connection = self.database.connect()
  
         try:
-            return self.dispatch_request(request)
+            return self.send_response(request)
         finally:
             request.database_connection.close()
 
         return request.respond_not_found()
-
-    def dispatch_request(self, request):
-        if request.path_info in ("/", "/index.html"):
-            return self.send_index(request)
-
-        if request.path_info == "/message.html":
-            return self.send_message(request)
-
-        if request.path_info == "/search.html":
-            return self.send_search(request)
-
-        if request.path_info == "/sender.html":
-            return self.send_sender(request)
-
-        if request.path_info == "/thread.html":
-            return self.send_thread(request)
-        
-        return self.send_file(request)
 
     def send_index(self, request):
         sql = ("select from_address from messages "
@@ -293,26 +275,20 @@ class Application(BrbnApplication):
 
         return self.thread_page.respond(request, head, values)
 
-class Page:
-    def __init__(self, app, parent, template, title, href):
-        self.app = app
-        self.parent = parent
-        self.template = template
-        self.title = title
-        self.href = href
+class Page(BrbnPage):
+    def __init__(self, app, parent, title, href, key):
+        super().__init__(app, parent, title, href)
 
-    def get_title(self, obj=None):
-        if obj is None:
-            return self.title
+        self.key = key
 
-        return self.title.format(xml_escape(obj.name))
+        self.template = _strings[self.key]
+        self.function = getattr(app, "send_{}".format(self.key))
 
-    def get_href(self, obj=None, id=None):
-        if obj is None:
-            return self.href
+        self.page_template = _strings["page"]
 
-        return self.href.format(url_escape(obj.id))
-        
+    def __call__(self, request):
+        return self.function(request)
+
     def render_link(self, obj=None):
         text = self.get_title(obj)
         href = self.get_href(obj)
@@ -351,10 +327,10 @@ class Page:
             "content": content,
         }
 
-        return _strings["page"].format(**values)
+        return self.page_template.format(**values)
 
     def respond(self, request, obj=None, values={}):
-        content = _strings[self.template]
+        content = self.template
         content = content.format(**values)
         content = self.render(content, obj)
 

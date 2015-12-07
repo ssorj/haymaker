@@ -49,6 +49,7 @@ class BrbnApplication:
     def __init__(self, home_dir=None):
         self.home_dir = home_dir
 
+        self.pages_by_path = dict()
         self.files_by_path = dict()
 
     def load(self):
@@ -92,28 +93,62 @@ class BrbnApplication:
         return self.receive_request(request)
     
     def receive_request(self, request):
-        pass
+        return self.send_response(request)
 
-    def send_file(self, request, path_info=None):
-        if path_info is None:
-            path_info = request.path_info
+    def send_response(self, request):
+        try:
+            page = self.pages_by_path[request.path]
+        except KeyError:
+            return self.send_file(request)
+
+        return page(request)
+    
+    def send_file(self, request, path=None):
+        if path is None:
+            path = request.path
         
-        if path_info == "/":
-            path_info = "/index.html"
+        if path == "/":
+            path = "/index.html"
         
         try:
-            content = self.files_by_path[path_info]
+            content = self.files_by_path[path]
         except KeyError:
             return request.respond_not_found()
 
-        name, ext = _os.path.splitext(path_info)
+        name, ext = _os.path.splitext(path)
 
         try:
             content_type = _content_types_by_extension[ext]
         except KeyError:
-            raise Exception("Unknown file type: {}".format(path_info))
+            raise Exception("Unknown file type: {}".format(path))
 
         return request.respond("200 OK", content, content_type)
+
+class BrbnPage:
+    def __init__(self, app, parent, title, href):
+        self.app = app
+        self.parent = parent
+        self.title = title
+        self.href = href
+
+        self.path = self.href
+
+        if "?" in self.href:
+            self.path = self.href.split("?", 1)[0]
+
+        self.app.pages_by_path[self.path] = self
+
+    def get_title(self, obj=None):
+        if obj is None:
+            return self.title
+
+        return self.title.format(xml_escape(obj.name))
+
+    def get_href(self, obj=None, id=None):
+        if obj is None:
+            return self.href
+
+        return self.href.format(url_escape(obj.id))
 
 class _Request:
     def __init__(self, app, env, start_response):
@@ -123,15 +158,15 @@ class _Request:
 
         self.response_headers = list()
 
-        self.path = None
+        self.abstract_path = None
         self.parameters = None
 
     def _load(self):
-        self.path = self._parse_path()
+        self.abstract_path = self._parse_path()
         self.parameters = self._parse_query_string()
     
     def _parse_path(self):
-        path = self.path_info
+        path = self.path
         path = path[1:].split("/")
         path = [url_unescape(x) for x in path]
 
@@ -163,7 +198,7 @@ class _Request:
         return self.env["REQUEST_METHOD"]
 
     @property
-    def path_info(self):
+    def path(self):
         return self.env["PATH_INFO"]
         
     def is_resource_modified(self, modification_time):
@@ -276,7 +311,7 @@ def xml_unescape(string):
 
 class ExampleApplication(BrbnApplication):
     def receive_request(self, request):
-        if request.path_info in ("/", "/index.html"):
+        if request.path in ("/", "/index.html"):
             return self.send_file(request, "/example.html")
 
         return self.send_file(request)
