@@ -92,17 +92,20 @@ class Application(BrbnApplication):
 
         for record in records:
             address = record[0]
-            href = self.sender_page.href.format(address)
+            href = self.sender_page.get_href(key=address)
+            text = xml_escape(address)
 
-            items.append(html_a(xml_escape(address), href))
+            items.append(html_a(text, href))
 
         senders = html_ul(items, class_="three-column")
 
         items = list()
         
         for topic in _topics:
-            href = self.search_page.href.format(url_escape(topic))
-            items.append(html_a(xml_escape(topic), href))
+            href = self.search_page.get_href(key=topic)
+            text = xml_escape(topic)
+            
+            items.append(html_a(text, href))
 
         topics = html_ul(items, class_="four-column")
                          

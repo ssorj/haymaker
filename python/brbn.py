@@ -175,17 +175,23 @@ class BrbnPage:
     def __call__(self, request):
         return self.function(request)
 
-    def get_title(self, obj=None):
-        if obj is None:
+    def get_title(self, obj=None, name=None):
+        if obj is None and name is None:
             return self.title
 
-        return self.title.format(xml_escape(obj.name))
+        if name is None:
+            name = obj.name
 
-    def get_href(self, obj=None):
-        if obj is None:
+        return self.title.format(xml_escape(name))
+    
+    def get_href(self, obj=None, key=None):
+        if obj is None and key is None:
             return self.href
 
-        return self.href.format(url_escape(obj.id))
+        if key is None:
+            key = obj.id
+        
+        return self.href.format(url_escape(key))
 
     def render_link(self, obj=None):
         href = self.get_href(obj)
