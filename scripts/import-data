@@ -24,25 +24,25 @@ from haystack import *
 from plano import *
 from mailbox import mbox
 
-in_reply_to_ids_by_id = dict()
+mbox_messages_by_id = dict()
 
-def import_message_ids(mbox_file):
-    notice("Importing message IDs from {}", mbox_file)
+def load_mbox_messages(mbox_file):
+    notice("Loading messages from {}", mbox_file)
 
     mb = mbox(mbox_file)
 
     for mbox_message in mb.values():
         id = mbox_message["Message-ID"]
-        in_reply_to_id = mbox_message["In-Reply-To"]
+        mbox_messages_by_id[id] = mbox_message
 
-        in_reply_to_ids_by_id[id] = in_reply_to_id
+def import_messages(cursor):
+    notice("Importing messages")
 
-def import_messages(cursor, mbox_file):
-    notice("Importing messages from {}", mbox_file)
+    message = Message()
     
-    mb = mbox(mbox_file)
-    
-    for mbox_message in mb.values():
+    for id, mbox_message in mbox_messages_by_id.items():
+        notice("Importing message {}", id)
+        
         from_header = mbox_message["From"]
         
         if from_header.endswith("<jira@apache.org>"):
@@ -54,34 +54,29 @@ def import_messages(cursor, mbox_file):
         if from_header.endswith("<git@git.apache.org>"):
             continue
 
-        message = Message.from_mbox_message(mbox_message)
+        message.load_from_mbox_message(mbox_message)
 
-        in_reply_to_ids_by_id[message.id] = message.in_reply_to_id
+        message.thread_id = find_thread_id(mbox_message)
 
-        message.thread_id = find_thread_id(message)
-
-        # print(message, message.thread_id)
-        
         message.save(cursor)
 
         cursor.connection.commit()
 
-def find_thread_id(message):
-    id = message.id
-    in_reply_to_id = message.in_reply_to_id
+def find_thread_id(mbox_message):
+    in_reply_to = mbox_messages_by_id.get(mbox_message.get("In-Reply-To"))
 
     while True:
-        if in_reply_to_id is None:
-            return id
-
-        id = in_reply_to_id
-        in_reply_to_id = in_reply_to_ids_by_id.get(id)
+        if in_reply_to is None:
+            return mbox_message["Message-ID"]
+    
+        mbox_message = mbox_messages_by_id[mbox_message.get("In-Reply-To")]
+        in_reply_to = mbox_messages_by_id.get(mbox_message.get("In-Reply-To"))
 
 database = MessageDatabase("data/data.sqlite")
 
 for name in list_dir("data", "*.mbox"):
     mbox_file = join("data", name)
-    import_message_ids(mbox_file)
+    load_mbox_messages(mbox_file)
 
 database.create_schema()
 
@@ -89,9 +84,7 @@ conn = database.connect()
 cursor = conn.cursor()
 
 try:
-    for name in list_dir("data", "*.mbox"):
-        mbox_file = join("data", name)
-        import_messages(cursor, mbox_file)
+    import_messages(cursor)
 finally:
     conn.close()
 

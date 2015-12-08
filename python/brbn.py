@@ -45,6 +45,34 @@ _content_types_by_extension = {
     ".woff": "application/font-woff",
 }
 
+_page_template = \
+"""<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>{title}</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <link rel="stylesheet" href="/site.css" type="text/css"/>
+    <link rel="icon" href="" type="image/png"/>
+  </head>
+  <body>
+    <div id="-head">
+      <div id="-head-content">
+        {path_navigation}
+      </div>
+    </div>
+    <div id="-body">
+      <div id="-body-content">
+        {body_content}
+      </div>
+    </div>
+    <div id="-foot">
+      <div id="-foot-content">
+      </div>
+    </div>
+  </body>
+</html>"""
+
 class BrbnApplication:
     def __init__(self, home_dir=None):
         self.home_dir = home_dir
@@ -96,8 +124,13 @@ class BrbnApplication:
         return self.send_response(request)
 
     def send_response(self, request):
+        path = request.path
+
+        if path == "/":
+            path = "/index.html"
+        
         try:
-            page = self.pages_by_path[request.path]
+            page = self.pages_by_path[path]
         except KeyError:
             return self.send_file(request)
 
@@ -125,11 +158,12 @@ class BrbnApplication:
         return request.respond("200 OK", content, content_type)
 
 class BrbnPage:
-    def __init__(self, app, parent, title, href):
+    def __init__(self, app, parent, title, href, function):
         self.app = app
         self.parent = parent
         self.title = title
         self.href = href
+        self.function = function
 
         self.path = self.href
 
@@ -138,18 +172,74 @@ class BrbnPage:
 
         self.app.pages_by_path[self.path] = self
 
+    def __call__(self, request):
+        return self.function(request)
+
     def get_title(self, obj=None):
         if obj is None:
             return self.title
 
         return self.title.format(xml_escape(obj.name))
 
-    def get_href(self, obj=None, id=None):
+    def get_href(self, obj=None):
         if obj is None:
             return self.href
 
         return self.href.format(url_escape(obj.id))
 
+    def render_link(self, obj=None):
+        href = self.get_href(obj)
+        text = self.get_title(obj)
+
+        return "<a href=\"{}\">{}</a>".format(href, text)
+
+    def render_brief_link(self, obj=None):
+        href = self.get_href(obj)
+        text = self.title
+
+        if obj is not None:
+            text = obj.name
+
+        return "<a href=\"{}\">{}</a>".format(href, text)
+
+    def render_path_navigation(self, obj=None):
+        links = list()
+        page = self
+        obj = obj
+
+        while page is not None:
+            links.append(page.render_link(obj))
+
+            page = page.parent
+
+            if obj is not None:
+                obj = obj.parent
+
+        items = ["<li>{}</li>".format(x) for x in reversed(links)]
+        items = "".join(items)
+        
+        return "<ul id=\"-path-navigation\">{}</ul>".format(items)
+
+    def render(self, body_content, obj=None):
+        title = self.get_title(obj)
+        path_navigation = self.render_link(obj)
+
+        if obj is not None:
+            path_navigation = self.render_path_navigation(obj)
+        
+        values = {
+            "title": title,
+            "path_navigation": path_navigation,
+            "body_content": body_content,
+        }
+
+        return _page_template.format(**values)
+
+    def send_response(self, request, content, obj=None):
+        page = self.render(content, obj)
+
+        return request.respond_ok(page, "text/html")
+    
 class _Request:
     def __init__(self, app, env, start_response):
         self.app = app
@@ -200,6 +290,14 @@ class _Request:
     @property
     def path(self):
         return self.env["PATH_INFO"]
+
+    def get(self, name):
+        try:
+            return self.parameters[name][0]
+        except KeyError:
+            raise # XXX bad request?
+        except IndexError:
+            raise # XXX bad request?
         
     def is_resource_modified(self, modification_time):
         ims_timestamp = self.env.get("HTTP_IF_MODIFIED_SINCE")

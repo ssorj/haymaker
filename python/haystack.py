@@ -1,4 +1,4 @@
-#
+
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -34,7 +34,6 @@ from pencil import *
 
 _log = logger("haystack")
 _strings = StringCatalog(__file__)
-
 _topics = _json.loads(_strings["topics"])
 
 class Application(BrbnApplication):
@@ -50,23 +49,28 @@ class Application(BrbnApplication):
         
         title = "Haystack"
         href = "/index.html"
-        self.index_page = Page(self, None, title, href, "index")
+        func = self.send_index
+        self.index_page = BrbnPage(self, None, title, href, func)
 
         title = "Message '{}'"
         href = "/message.html?id={}"
-        self.message_page = Page(self, self.index_page, title, href, "message")
+        func = self.send_message
+        self.message_page = BrbnPage(self, self.index_page, title, href, func)
 
-        title = "Search"
+        title = "Search '{}'"
         href = "/search.html?query={}"
-        self.search_page = Page(self, self.index_page, title, href, "search")
+        func = self.send_search
+        self.search_page = BrbnPage(self, self.index_page, title, href, func)
 
         title = "Sender '{}'"
         href = "/sender.html?id={}"
-        self.sender_page = Page(self, self.index_page, title, href, "sender")
+        func = self.send_sender
+        self.sender_page = BrbnPage(self, self.index_page, title, href, func)
 
         title = "Thread '{}'"
         href = "/thread.html?id={}"
-        self.thread_page = Page(self, self.index_page, title, href, "thread")
+        func = self.send_thread
+        self.thread_page = BrbnPage(self, self.index_page, title, href, func)
     
     def receive_request(self, request):
         request.database_connection = self.database.connect()
@@ -88,7 +92,7 @@ class Application(BrbnApplication):
 
         for record in records:
             address = record[0]
-            href = "/sender.html?id={}".format(address)
+            href = self.sender_page.href.format(address)
 
             items.append(html_a(xml_escape(address), href))
 
@@ -97,7 +101,7 @@ class Application(BrbnApplication):
         items = list()
         
         for topic in _topics:
-            href = "/search.html?query={}".format(url_escape(topic))
+            href = self.search_page.href.format(url_escape(topic))
             items.append(html_a(xml_escape(topic), href))
 
         topics = html_ul(items, class_="four-column")
@@ -106,11 +110,13 @@ class Application(BrbnApplication):
             "senders": senders,
             "topics": topics,
         }
-        
-        return self.index_page.respond(request, None, values)
+
+        content = _strings["index"].format(**values)
+
+        return self.index_page.send_response(request, content)
         
     def send_message(self, request):
-        id = request.parameters["id"][0]
+        id = request.get("id")
 
         try:
             message = self.database.get(request, Message, id)
@@ -145,7 +151,7 @@ class Application(BrbnApplication):
 
         from_field = "{} <{}>".format(message.from_name, message.from_address)
 
-        content = ""
+        message_content = ""
         
         if message.content is not None:
             lines = list()
@@ -165,7 +171,7 @@ class Application(BrbnApplication):
                     
                 lines.append(line)
 
-            content = "\n".join(lines)
+            message_content = "\n".join(lines)
         
         values = {
             "id": xml_escape(message.id),
@@ -175,24 +181,28 @@ class Application(BrbnApplication):
             "from": xml_escape(from_field),
             "date": xml_escape(_email.formatdate(message.date)),
             "subject": xml_escape(message.subject),
-            "message_content": content,
+            "message_content": message_content,
         }
 
-        return self.message_page.respond(request, message, values)
+        content = _strings["message"].format(**values)
+
+        return self.message_page.send_response(request, content, message)
 
     def send_search(self, request):
-        query = request.parameters.get("query", [""])[0]
+        query = request.get("query")
+        obj = Object(query, query)
 
         sql = ("select * from messages where id in "
                "(select id from messages_fts "
-               " where messages_fts match ? limit 1000)"
+               " where messages_fts match ? limit 1000) "
                "order by date desc")
 
         records = self.database.query(request, sql, query)
+        message = Message()
         rows = list()
 
         for record in records:
-            message = Message.from_database_record(record)
+            message.load_from_record(record)
             message_link = self.message_page.render_brief_link(message)
             
             cols = [
@@ -209,20 +219,23 @@ class Application(BrbnApplication):
             "messages": html_table(rows, False, class_="messages four"),
         }
 
-        return self.search_page.respond(request, None, values)
+        content = _strings["search"].format(**values)
+        
+        return self.search_page.send_response(request, content, obj)
 
     def send_sender(self, request):
-        address = request.parameters["id"][0]
+        address = request.get("id")
         obj = Object(address, address)
 
         sql = ("select * from messages where from_address = ? "
                "order by date desc limit 1000")
 
         records = self.database.query(request, sql, address)
+        message = Message()
         rows = list()
 
         for record in records:
-            message = Message.from_database_record(record)
+            message.load_from_record(record)
             message_link = self.message_page.render_brief_link(message)
             
             cols = [
@@ -238,10 +251,12 @@ class Application(BrbnApplication):
             "messages": html_table(rows, False, class_="messages"),
         }
 
-        return self.sender_page.respond(request, obj, values)
+        content = _strings["sender"].format(**values)
+
+        return self.sender_page.send_response(request, content, obj)
     
     def send_thread(self, request):
-        id = request.parameters.get("id", [""])[0]
+        id = request.get("id")
 
         try:
             head = self.database.get(request, Message, id)
@@ -253,10 +268,11 @@ class Application(BrbnApplication):
                "order by date asc limit 1000")
 
         records = self.database.query(request, sql, id)
+        message = Message()
         rows = list()
 
         for record in records:
-            message = Message.from_database_record(record)
+            message.load_from_record(record)
             message_link = self.message_page.render_brief_link(message)
             
             cols = [
@@ -273,68 +289,9 @@ class Application(BrbnApplication):
             "messages": html_table(rows, False, class_="messages four"),
         }
 
-        return self.thread_page.respond(request, head, values)
+        content = _strings["thread"].format(**values)
 
-class Page(BrbnPage):
-    def __init__(self, app, parent, title, href, key):
-        super().__init__(app, parent, title, href)
-
-        self.key = key
-
-        self.template = _strings[self.key]
-        self.function = getattr(app, "send_{}".format(self.key))
-
-        self.page_template = _strings["page"]
-
-    def __call__(self, request):
-        return self.function(request)
-
-    def render_link(self, obj=None):
-        text = self.get_title(obj)
-        href = self.get_href(obj)
-
-        return html_a(text, href)
-
-    def render_brief_link(self, obj=None):
-        text = self.title
-        href = self.get_href(obj)
-
-        if obj is not None:
-            text = obj.name
-
-        return html_a(text, href)
-        
-    def render(self, content, obj=None):
-        title = self.get_title(obj)
-        
-        links = list()
-        page = self
-        obj = obj
-
-        while page is not None:
-            links.append(page.render_link(obj))
-
-            page = page.parent
-
-            if obj is not None:
-                obj = obj.parent
-
-        links.reverse()
-
-        values = {
-            "title": title,
-            "path_navigation": html_ul(links, id="-path-navigation"),
-            "content": content,
-        }
-
-        return self.page_template.format(**values)
-
-    def respond(self, request, obj=None, values={}):
-        content = self.template
-        content = content.format(**values)
-        content = self.render(content, obj)
-
-        return request.respond_ok(content, "text/html")
+        return self.thread_page.send_response(request, content, head)
 
 class MessageDatabase:
     def __init__(self, path):
@@ -387,8 +344,7 @@ class MessageDatabase:
         conn = self.connect()
         cursor = conn.cursor()
 
-        ddl = "insert into messages_fts (messages_fts)"
-        ddl = "{} values ('optimize')".format(ddl)
+        ddl = "insert into messages_fts (messages_fts) values ('optimize')"
 
         try:
             cursor.execute(ddl)
@@ -425,7 +381,10 @@ class MessageDatabase:
         if record is None:
             raise ObjectNotFound()
 
-        return cls.from_database_record(record)
+        obj = cls()
+        obj.load_from_record(record)
+        
+        return obj
 
 class ObjectNotFound(Exception):
     pass
@@ -489,101 +448,47 @@ class Message(DatabaseObject):
         for name in self.fields:
             setattr(self, name, None)
 
-    @classmethod
-    def from_mbox_message(cls, mbox_message):
-        message = cls()
-
-        for name in cls.field_mbox_keys:
-            mbox_key = cls.field_mbox_keys[name]
-            value = mbox_message.get(mbox_key)
-            field_type = cls.field_types.get(name, str)
-
-            if value is not None:
-                value = field_type(value)
-
-            setattr(message, name, value)
-
-        name, address = _email.parseaddr(mbox_message["From"])
-
-        message.from_name = name
-        message.from_address = address
-
-        tup = _email.parsedate(mbox_message["Date"])
-        message.date = _time.mktime(tup)
-        
-        content = cls._get_mbox_content(mbox_message)
-
-        assert content is not None
-
-        message.content = content
-        message.authored_content = cls._get_authored_content(message.content)
-        message.authored_words = len(message.authored_content.split())
-        
-        return message
-
-    @classmethod
-    def _get_mbox_content(cls, mbox_message):
-        content_type = None
-        content_encoding = None
-        content = None
-        
-        if mbox_message.is_multipart():
-            for part in mbox_message.walk():
-                if part.get_content_type() == "text/plain":
-                    content_type = "text/plain"
-                    content_encoding = part["Content-Transfer-Encoding"]
-                    content = part.get_payload()
-
-        if content_type is None:
-            content_type = mbox_message.get_content_type()
-            content_encoding = mbox_message["Content-Transfer-Encoding"]
-            content = mbox_message.get_payload()
-
-        assert content_type is not None
-        assert content is not None
-
-        if content_encoding == "quoted-printable":
-            content = _quopri.decodestring(content)
-            content = content.decode("utf-8", errors="replace")
-
-        if content_type == "text/html":
-            content = strip_tags(content)
-        
-        return content
-
-    @classmethod
-    def _get_authored_content(cls, content):
-        lines = list()
-
-        for line in content.splitlines():
-            line = line.strip()
-
-            if line.startswith(">"):
-                continue
-
-            lines.append(line)
-
-        return "\n".join(lines)
-    
-    @classmethod
-    def from_database_record(cls, record):
-        message = cls()
-        
-        for i, name in enumerate(cls.fields):
-            value = record[i]
-            field_type = cls.field_types.get(name, str)
-
-            if value is not None:
-                value = field_type(value)
-
-            setattr(message, name, value)
-
-        return message
-
     @property
     def name(self):
         return self.subject
     
+    def load_from_mbox_message(self, mbox_message):
+        for name in self.field_mbox_keys:
+            mbox_key = self.field_mbox_keys[name]
+            value = mbox_message.get(mbox_key)
+            field_type = self.field_types.get(name, str)
+
+            if value is not None:
+                value = field_type(value)
+
+            setattr(self, name, value)
+
+        name, address = _email.parseaddr(mbox_message["From"])
+
+        self.from_name = name
+        self.from_address = address
+
+        tup = _email.parsedate(mbox_message["Date"])
+        self.date = _time.mktime(tup)
+        
+        content = _get_mbox_content(mbox_message)
+
+        assert content is not None
+
+        self.content = content
+        self.authored_content = _get_authored_content(self.content)
+        self.authored_words = len(self.authored_content.split())
+
+    def load_from_record(self, record):
+        for i, name in enumerate(self.fields):
+            value = record[i]
+            field_type = self.field_types.get(name, str)
+
+            if value is not None:
+                value = field_type(value)
+
+            setattr(self, name, value)
+
     def save(self, cursor):
         columns = ", ".join(self.fields)
         values = ", ".join("?" * len(self.fields))
@@ -600,3 +505,46 @@ class Message(DatabaseObject):
         dml = "insert into messages_fts ({}) values ({})".format(columns, values)
 
         cursor.execute(dml, args)
+
+def _get_mbox_content(mbox_message):
+    content_type = None
+    content_encoding = None
+    content = None
+    
+    if mbox_message.is_multipart():
+        for part in mbox_message.walk():
+            if part.get_content_type() == "text/plain":
+                content_type = "text/plain"
+                content_encoding = part["Content-Transfer-Encoding"]
+                content = part.get_payload()
+
+    if content_type is None:
+        content_type = mbox_message.get_content_type()
+        content_encoding = mbox_message["Content-Transfer-Encoding"]
+        content = mbox_message.get_payload()
+
+    assert content_type is not None
+    assert content is not None
+
+    if content_encoding == "quoted-printable":
+        content = _quopri.decodestring(content)
+        content = content.decode("utf-8", errors="replace")
+
+    if content_type == "text/html":
+        content = strip_tags(content)
+    
+    return content
+
+def _get_authored_content(content):
+    lines = list()
+
+    for line in content.splitlines():
+        line = line.strip()
+
+        if line.startswith(">"):
+            continue
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
