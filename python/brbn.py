@@ -21,17 +21,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import datetime as _datetime
+import hashlib as _hashlib
 import logging as _logging
 import os as _os
 import sys as _sys
 import time as _time
 import traceback as _traceback
-import urllib.parse as _parse
+import urllib as _urllib
 
 _log = _logging.getLogger("brbn")
-
-_http_date = "%a, %d %b %Y %H:%M:%S %Z"
 
 _content_types_by_extension = {
     ".css": "text/css",
@@ -79,10 +77,13 @@ class BrbnApplication:
 
         self.pages_by_path = dict()
         self.files_by_path = dict()
+        self.file_etags_by_path = dict()
+
+        self.load_time = None
 
     def load(self):
         self._load_files()
-
+        
     def _load_files(self):
         if self.home_dir is None:
             return
@@ -100,8 +101,10 @@ class BrbnApplication:
                     content = file.read()
 
                 path = path[len(files_dir):]
+                etag = _hashlib.sha1(content).hexdigest()[:8]
 
                 self.files_by_path[path] = content
+                self.file_etags_by_path[path] = etag
 
     def __call__(self, env, start_response):
         request = _Request(self, env, start_response)
@@ -142,7 +145,12 @@ class BrbnApplication:
         
         if path == "/":
             path = "/index.html"
-        
+
+        etag = self.file_etags_by_path.get(path)
+
+        if not request.is_modified(etag):
+            return request.respond_not_modified()
+            
         try:
             content = self.files_by_path[path]
         except KeyError:
@@ -154,6 +162,9 @@ class BrbnApplication:
             content_type = _content_types_by_extension[ext]
         except KeyError:
             raise Exception("Unknown file type: {}".format(path))
+
+        request.response_headers.append(("ETag", etag))
+        request.response_headers.append(("Cache-Control", "max-age=120"))
 
         return request.respond("200 OK", content, content_type)
 
@@ -285,7 +296,7 @@ class _Request:
             return {}
 
         try:
-            return _parse.parse_qs(query_string, False, True)
+            return _urllib.parse.parse_qs(query_string, False, True)
         except ValueError:
             raise _RequestError(self, "Failed to parse query string")
 
@@ -305,17 +316,11 @@ class _Request:
         except IndexError:
             raise # XXX bad request?
         
-    def is_resource_modified(self, modification_time):
-        ims_timestamp = self.env.get("HTTP_IF_MODIFIED_SINCE")
+    def is_modified(self, server_etag):
+        client_etag = self.env.get("HTTP_IF_NONE_MATCH")
 
-        if ims_timestamp is not None and modification_time is not None:
-            modification_time = modification_time.replace(microsecond=0)
-            ims_time = _datetime.datetime.strptime(ims_timestamp, _http_date)
-
-            # _log.info("304 if updated {} <= IMS {}".format(update_time, ims_time))
-
-            if modification_time <= ims_time:
-                return False
+        if client_etag is not None and server_etag is not None:
+            return client_etag != server_etag
 
         return True
 

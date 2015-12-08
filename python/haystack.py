@@ -1,4 +1,4 @@
-
+#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -63,7 +63,7 @@ class Application(BrbnApplication):
         self.search_page = BrbnPage(self, self.index_page, title, href, func)
 
         title = "Sender '{}'"
-        href = "/sender.html?id={}"
+        href = "/sender.html?address={}"
         func = self.send_sender
         self.sender_page = BrbnPage(self, self.index_page, title, href, func)
 
@@ -208,14 +208,14 @@ class Application(BrbnApplication):
             message.load_from_record(record)
             message_link = self.message_page.render_brief_link(message)
             
-            cols = [
+            row = [
                 message_link,
                 xml_escape(message.from_address),
                 message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
             ]
 
-            rows.append(cols)
+            rows.append(row)
 
         values = {
             "query": xml_escape(query),
@@ -227,7 +227,7 @@ class Application(BrbnApplication):
         return self.search_page.send_response(request, content, obj)
 
     def send_sender(self, request):
-        address = request.get("id")
+        address = request.get("address")
         obj = Object(address, address)
 
         sql = ("select * from messages where from_address = ? "
@@ -241,13 +241,13 @@ class Application(BrbnApplication):
             message.load_from_record(record)
             message_link = self.message_page.render_brief_link(message)
             
-            cols = [
+            row = [
                 message_link,
                 message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
             ]
 
-            rows.append(cols)
+            rows.append(row)
 
         values = {
             "address": xml_escape(address),
@@ -278,14 +278,14 @@ class Application(BrbnApplication):
             message.load_from_record(record)
             message_link = self.message_page.render_brief_link(message)
             
-            cols = [
+            row = [
                 message_link,
                 xml_escape(message.from_address),
                 message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
             ]
 
-            rows.append(cols)
+            rows.append(row)
 
         values = {
             "subject": xml_escape(head.subject),
