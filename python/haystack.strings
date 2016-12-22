@@ -39,7 +39,7 @@ Search and browse Qpid mailing list content.
 
 <h2>Messages by sender</h2>
 
-<p>The senders listed here are those with at least 100 messages.
+<p>The senders listed here are those with at least 200 messages.
 <!-- See <a href="">all senders</a>. --></p>
 
 {senders}
@@ -80,7 +80,9 @@ Search and browse Qpid mailing list content.
 [thread]
 <h1>{subject}</h1>
 
-{messages}
+{thread_index}
+
+{thread_content}
 
 [topics]
 [
@@ -135,7 +137,6 @@ Search and browse Qpid mailing list content.
     "correlation",
     "credit",
     "deadlock",
-    "deadlock",
     "debian",
     "delayed delivery",
     "delivery guarantee",
@@ -163,7 +164,6 @@ Search and browse Qpid mailing list content.
     "failover",
     "federation",
     "fedora",
-    "flow control",
     "flow control",
     "flow to disk",
     "git",
@@ -226,13 +226,11 @@ Search and browse Qpid mailing list content.
     "peer to peer",
     "performance",
     "perl",
-    "perl",
     "persistence",
     "php",
     "pkgconfig",
     "plugin",
     "policy",
-    "prefetch",
     "prefetch",
     "priority queue",
     "producer flow control",

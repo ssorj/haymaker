@@ -6,9 +6,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #   http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -43,10 +43,10 @@ class Application(BrbnApplication):
         add_logged_module("haystack")
 
         setup_console_logging("info")
-        
+
         path = _os.path.join(self.home_dir, "data", "data.sqlite")
         self.database = MessageDatabase(path)
-        
+
         title = "Haystack"
         href = "/index.html"
         func = self.send_index
@@ -71,10 +71,10 @@ class Application(BrbnApplication):
         href = "/thread.html?id={}"
         func = self.send_thread
         self.thread_page = BrbnPage(self, self.index_page, title, href, func)
-    
+
     def receive_request(self, request):
         request.database_connection = self.database.connect()
- 
+
         try:
             return self.send_response(request)
         finally:
@@ -84,7 +84,7 @@ class Application(BrbnApplication):
 
     def send_index(self, request):
         sql = ("select from_address from messages "
-               "group by from_address having count(id) > 100 "
+               "group by from_address having count(id) > 200 "
                "order by from_address collate nocase")
 
         records = self.database.query(request, sql)
@@ -100,15 +100,15 @@ class Application(BrbnApplication):
         senders = html_ul(items, class_="three-column")
 
         items = list()
-        
+
         for topic in _topics:
             href = self.search_page.get_href(key=topic)
             text = xml_escape(topic)
-            
+
             items.append(html_a(text, href))
 
         topics = html_ul(items, class_="four-column")
-                         
+
         values = {
             "senders": senders,
             "topics": topics,
@@ -117,7 +117,7 @@ class Application(BrbnApplication):
         content = _strings["index"].format(**values)
 
         return self.index_page.send_response(request, content)
-        
+
     def send_message(self, request):
         id = request.get("id")
 
@@ -125,7 +125,7 @@ class Application(BrbnApplication):
             message = self.database.get(request, Message, id)
         except ObjectNotFound as e:
             return request.respond_not_found()
-            
+
         in_reply_to = None
         in_reply_to_id = message.in_reply_to_id
         in_reply_to_link = in_reply_to_id
@@ -155,27 +155,27 @@ class Application(BrbnApplication):
         from_field = "{} <{}>".format(message.from_name, message.from_address)
 
         message_content = ""
-        
+
         if message.content is not None:
             lines = list()
-        
+
             for line in message.content.splitlines():
                 line = line.strip()
 
                 if line.startswith(">"):
                     m = _re.match("^[> ]+", line)
                     prefix = "\n{}".format(m.group(0))
-                    
+
                     line = prefix.join(_textwrap.wrap(line, 80))
                     line = html_span(xml_escape(line), class_="quoted")
                 else:
                     line = "\n".join(_textwrap.wrap(line, 80))
                     line = xml_escape(line)
-                    
+
                 lines.append(line)
 
             message_content = "\n".join(lines)
-        
+
         values = {
             "id": xml_escape(message.id),
             "in_reply_to_link": in_reply_to_link,
@@ -196,7 +196,7 @@ class Application(BrbnApplication):
         obj = Object(query, query)
 
         sql = ("select * from messages where id in "
-               "(select id from messages_fts "
+               "(select distinct thread_id from messages_fts "
                " where messages_fts match ? limit 1000) "
                "order by date desc")
 
@@ -206,10 +206,10 @@ class Application(BrbnApplication):
 
         for record in records:
             message.load_from_record(record)
-            message_link = self.message_page.render_brief_link(message)
-            
+            thread_link = self.thread_page.render_brief_link(message)
+
             row = [
-                message_link,
+                thread_link,
                 xml_escape(message.from_address),
                 message.authored_words,
                 xml_escape(str(_email.formatdate(message.date)[:-6])),
@@ -223,7 +223,7 @@ class Application(BrbnApplication):
         }
 
         content = _strings["search"].format(**values)
-        
+
         return self.search_page.send_response(request, content, obj)
 
     def send_sender(self, request):
@@ -240,7 +240,7 @@ class Application(BrbnApplication):
         for record in records:
             message.load_from_record(record)
             message_link = self.message_page.render_brief_link(message)
-            
+
             row = [
                 message_link,
                 message.authored_words,
@@ -257,7 +257,7 @@ class Application(BrbnApplication):
         content = _strings["sender"].format(**values)
 
         return self.sender_page.send_response(request, content, obj)
-    
+
     def send_thread(self, request):
         id = request.get("id")
 
@@ -265,31 +265,58 @@ class Application(BrbnApplication):
             head = self.database.get(request, Message, id)
         except ObjectNotFound as e:
             return request.respond_not_found()
-            
+
         sql = ("select * from messages "
                "where thread_id = ? "
-               "order by date asc limit 1000")
+               "order by thread_position, date asc "
+               "limit 1000")
 
         records = self.database.query(request, sql, id)
-        message = Message()
-        rows = list()
+        messages = list()
+        messages_by_id = dict()
 
         for record in records:
+            message = Message()
             message.load_from_record(record)
-            message_link = self.message_page.render_brief_link(message)
-            
+
+            messages.append(message)
+            messages_by_id[message.id] = message
+
+        thread_index_rows = list()
+        thread_content = list()
+
+        for i, message in enumerate(messages):
+            message_date = _time.strftime("%d %b %Y", _time.gmtime(message.date))
+            message_href = self.message_page.get_href(message)
+            message_number = i + 1
+            message_title = "{}. {}".format(message_number, message.from_name)
+
+            if message.in_reply_to_id is not None:
+                rmessage = messages_by_id.get(message.in_reply_to_id)
+
+                if rmessage is not None:
+                    rperson = rmessage.from_name
+                    message_title = "{} replying to {}".format(message_title, rperson)
+
             row = [
-                message_link,
-                xml_escape(message.from_address),
+                html_a(xml_escape(message_title), "#{}".format(message_number)),
+                xml_escape(message_date),
                 message.authored_words,
-                xml_escape(str(_email.formatdate(message.date)[:-6])),
+                html_a("Message", message_href),
             ]
 
-            rows.append(row)
+            thread_index_rows.append(row)
+
+            thread_content.append(html_elem("h2", message_title, id=str(message_number)))
+            thread_content.append(html_elem("pre", message.content))
+
+        thread_index = html_table(thread_index_rows, False, class_="messages four")
+        thread_content = "\n".join(thread_content)
 
         values = {
             "subject": xml_escape(head.subject),
-            "messages": html_table(rows, False, class_="messages four"),
+            "thread_index": thread_index,
+            "thread_content": thread_content,
         }
 
         content = _strings["thread"].format(**values)
@@ -329,9 +356,9 @@ class MessageDatabase:
 
         columns = ", ".join(Message.fts_fields)
         ddl = ("create virtual table messages_fts using fts4 "
-               "({}, notindexed=id, tokenize=porter)"
+               "({}, notindexed=id, notindexed=thread_id, tokenize=porter)"
                "".format(columns))
-               
+
         statements.append(ddl)
 
         conn = self.connect()
@@ -356,10 +383,10 @@ class MessageDatabase:
 
     def cursor(self, request):
         return request.database_connection.cursor()
-            
+
     def query(self, request, sql, *args):
         cursor = self.cursor(request)
-        
+
         try:
             cursor.execute(sql, args)
             return cursor.fetchall()
@@ -368,10 +395,10 @@ class MessageDatabase:
 
     def get(self, request, cls, id):
         _log.debug("Getting {} with ID {}".format(cls.__name__, id))
-        
+
         assert issubclass(cls, DatabaseObject), cls
         assert id is not None
-        
+
         sql = "select * from {} where id = ?".format(cls.table)
         cursor = self.cursor(request)
 
@@ -386,12 +413,12 @@ class MessageDatabase:
 
         obj = cls()
         obj.load_from_record(record)
-        
+
         return obj
 
 class ObjectNotFound(Exception):
     pass
-    
+
 class Object:
     def __init__(self, id, name, parent=None):
         self.id = id
@@ -401,16 +428,16 @@ class Object:
     @property
     def name(self):
         return self._name
-    
+
     def __repr__(self):
         return format_repr(self, self.id)
 
 class DatabaseObject(Object):
     table = None
-    
+
 class Message(DatabaseObject):
     table = "messages"
-    
+
     fields = [
         "id",
         "in_reply_to_id",
@@ -424,11 +451,13 @@ class Message(DatabaseObject):
         "authored_content",
         "authored_words",
         "thread_id",
+        "thread_position",
     ]
 
     field_types = {
         "date": int,
         "authored_words": int,
+        "thread_position": int,
     }
 
     field_mbox_keys = {
@@ -441,20 +470,21 @@ class Message(DatabaseObject):
 
     fts_fields = [
         "id",
+        "thread_id",
         "subject",
         "authored_content",
     ]
-    
+
     def __init__(self):
         super().__init__(None, None)
-        
+
         for name in self.fields:
             setattr(self, name, None)
 
     @property
     def name(self):
         return self.subject
-    
+
     def load_from_mbox_message(self, mbox_message):
         for name in self.field_mbox_keys:
             mbox_key = self.field_mbox_keys[name]
@@ -473,7 +503,7 @@ class Message(DatabaseObject):
 
         tup = _email.parsedate(mbox_message["Date"])
         self.date = _time.mktime(tup)
-        
+
         content = _get_mbox_content(mbox_message)
 
         assert content is not None
@@ -513,7 +543,7 @@ def _get_mbox_content(mbox_message):
     content_type = None
     content_encoding = None
     content = None
-    
+
     if mbox_message.is_multipart():
         for part in mbox_message.walk():
             if part.get_content_type() == "text/plain":
@@ -535,7 +565,7 @@ def _get_mbox_content(mbox_message):
 
     if content_type == "text/html":
         content = strip_tags(content)
-    
+
     return content
 
 def _get_authored_content(content):
@@ -550,4 +580,3 @@ def _get_authored_content(content):
         lines.append(line)
 
     return "\n".join(lines)
-

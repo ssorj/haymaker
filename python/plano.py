@@ -6,9 +6,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #   http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -20,20 +20,54 @@
 from __future__ import print_function
 
 import atexit as _atexit
+import binascii as _binascii
 import codecs as _codecs
+import collections as _collections
 import fnmatch as _fnmatch
 import getpass as _getpass
 import os as _os
 import random as _random
 import re as _re
+import shlex as _shlex
 import shutil as _shutil
+import signal as _signal
 import subprocess as _subprocess
 import sys as _sys
 import tarfile as _tarfile
 import tempfile as _tempfile
+import time as _time
 import traceback as _traceback
+import types as _types
+import uuid as _uuid
+
+from subprocess import CalledProcessError
 
 # See documentation at http://www.ssorj.net/projects/plano.html
+
+_message_levels = (
+    "debug",
+    "notice",
+    "warn",
+    "error",
+)
+
+_debug = _message_levels.index("debug")
+_notice = _message_levels.index("notice")
+_warn = _message_levels.index("warn")
+_error = _message_levels.index("error")
+
+_message_output = _sys.stderr
+_message_threshold = _notice
+
+def set_message_output(writeable):
+    global _message_output
+    _message_output = writeable
+
+def set_message_threshold(level):
+    assert level in _message_levels
+
+    global _message_threshold
+    _message_threshold = _message_levels.index(level)
 
 def fail(message, *args):
     error(message, *args)
@@ -44,49 +78,64 @@ def fail(message, *args):
     raise Exception(message)
 
 def error(message, *args):
-    _traceback.print_exc()
-    _print_message("Error", message, args, _sys.stderr)
+    _print_message("Error", message, args)
 
 def warn(message, *args):
-    _print_message("Warn", message, args, _sys.stderr)
+    if _message_threshold <= _warn:
+        _print_message("Warn", message, args)
 
 def notice(message, *args):
-    _print_message(None, message, args, _sys.stdout)
+    if _message_threshold <= _notice:
+        _print_message(None, message, args)
 
 def debug(message, *args):
-    _print_message("Debug", message, args, _sys.stdout)
+    if _message_threshold <= _debug:
+        _print_message("Debug", message, args)
 
-def exit(message=None, *args):
-    if message is None:
+def exit(arg=None, *args):
+    if arg in (0, None):
         _sys.exit()
 
-    _print_message("Error", message, args, _sys.stderr)
+    if _is_string(arg):
+        error(arg, args)
+        _sys.exit(1)
+    elif isinstance(arg, _types.IntType):
+        error("Exiting with code {0}", arg)
+        _sys.exit(arg)
+    else:
+        raise Exception()
 
-    _sys.exit(1)
+def _print_message(category, message, args):
+    if _message_output is None:
+        return
 
-def _print_message(category, message, args, file):
     message = _format_message(category, message, args)
 
-    print(message, file=file)
-    file.flush()
+    print(message, file=_message_output)
+
+    _message_output.flush()
 
 def _format_message(category, message, args):
-    if isinstance(message, BaseException):
+    if not _is_string(message):
         message = str(message)
-
-        if message == "":
-            message = message.__class__.__name__
-
-    if category:
-        message = "{}: {}".format(category, message)
 
     if args:
         message = message.format(*args)
 
-    script = split(_sys.argv[0])[1]
-    message = "{}: {}".format(script, message)
+    if len(message) > 0 and message[0].islower():
+        message = message[0].upper() + message[1:]
+
+    if category:
+        message = "{0}: {1}".format(category, message)
+
+    program = program_name()
+    message = "{0}: {1}".format(program, message)
 
     return message
+
+def flush():
+    _sys.stdout.flush()
+    _sys.stderr.flush()
 
 absolute_path = _os.path.abspath
 normalize_path = _os.path.normpath
@@ -100,15 +149,17 @@ join = _os.path.join
 split = _os.path.split
 split_extension = _os.path.splitext
 
+current_dir = _os.getcwd
+sleep = _time.sleep
+
 LINE_SEP = _os.linesep
 PATH_SEP = _os.sep
+PATH_VAR_SEP = _os.pathsep
 ENV = _os.environ
 ARGS = _sys.argv
 
-current_dir = _os.getcwd
-
 def home_dir(user=""):
-    return _os.path.expanduser("~{}".format(user))
+    return _os.path.expanduser("~{0}".format(user))
 
 def parent_dir(path):
     path = normalize_path(path)
@@ -135,8 +186,18 @@ def name_stem(file):
 def name_extension(file):
     name = file_name(file)
     stem, ext = split_extension(name)
-    
+
     return ext
+
+def program_name(command=None):
+    if command is None:
+        args = ARGS
+    else:
+        args = command.split()
+
+    for arg in args:
+        if "=" not in arg:
+            return file_name(arg)
 
 def read(file):
     with _codecs.open(file, encoding="utf-8", mode="r") as f:
@@ -160,8 +221,12 @@ def prepend(file, string):
 
     return write(file, prepended)
 
+# XXX Should this work on directories?
 def touch(file):
     return append(file, "")
+
+def tail(file, n):
+    return "".join(tail_lines(file, n))
 
 def read_lines(file):
     with _codecs.open(file, encoding="utf-8", mode="r") as f:
@@ -188,40 +253,40 @@ def prepend_lines(file, lines):
 
     return file
 
-_temp_dir = _tempfile.mkdtemp(prefix="plano.")
+# Derived from http://stackoverflow.com/questions/136168/get-last-n-lines-of-a-file-with-python-similar-to-tail
+def tail_lines(file, n):
+    assert n >= 0
 
-def _get_temp_file(key):
-    assert not key.startswith("_")
+    with _codecs.open(file, encoding="utf-8", mode="r") as f:
+        pos = n + 1
+        lines = list()
 
-    return join(_temp_dir, "_file_{}".format(key))
+        while len(lines) <= n:
+                try:
+                    f.seek(-pos, 2)
+                except IOError:
+                    f.seek(0)
+                    break
+                finally:
+                    lines = f.readlines()
+
+                pos *= 2
+
+        return lines[-n:]
+
+_temp_dir = _tempfile.mkdtemp(prefix="plano-")
 
 def _remove_temp_dir():
     _shutil.rmtree(_temp_dir, ignore_errors=True)
 
 _atexit.register(_remove_temp_dir)
 
-def read_temp(key):
-    file = _get_temp_file(key)
-    return read(file)
+# XXX Use _tempfile instead
+def make_temp_file():
+    key = unique_id(4)
+    file = join(_temp_dir, "_file_{0}".format(key))
 
-def write_temp(key, string):
-    file = _get_temp_file(key)
-    return write(file, string)
-
-def append_temp(key, string):
-    file = _get_temp_file(key)
-    return append(file, string)
-
-def prepend_temp(key, string):
-    file = _get_temp_file(key)
-    return prepend(file, string)
-
-def make_temp(key):
-    return append_temp(key, "")
-
-def open_temp(key, mode="r"):
-    file = _get_temp_file(key)
-    return _codecs.open(file, encoding="utf-8", mode=mode)
+    return append(file, "")
 
 # This one is deleted on process exit
 def make_temp_dir():
@@ -235,8 +300,17 @@ def make_user_temp_dir():
 
     return make_dir(user_temp_dir)
 
+def unique_id(length=16):
+    assert length >= 1
+    assert length <= 16
+
+    uuid_bytes = _uuid.uuid4().bytes
+    uuid_bytes = uuid_bytes[:length]
+
+    return _binascii.hexlify(uuid_bytes).decode("utf-8")
+
 def copy(from_path, to_path):
-    notice("Copying '{}' to '{}'", from_path, to_path)
+    notice("Copying '{0}' to '{1}'", from_path, to_path)
 
     to_dir = parent_dir(to_path)
 
@@ -251,7 +325,7 @@ def copy(from_path, to_path):
     return to_path
 
 def move(from_path, to_path):
-    notice("Moving '{}' to '{}'", from_path, to_path)
+    notice("Moving '{0}' to '{1}'", from_path, to_path)
 
     _shutil.move(from_path, to_path)
 
@@ -263,14 +337,14 @@ def rename(path, expr, replacement):
     to_name = string_replace(name, expr, replacement)
     to_path = join(parent_dir, to_name)
 
-    notice("Renaming '{}' to '{}'", path, to_path)
+    notice("Renaming '{0}' to '{1}'", path, to_path)
 
     move(path, to_path)
 
     return to_path
 
 def remove(path):
-    notice("Removing '{}'", path)
+    notice("Removing '{0}'", path)
 
     if not exists(path):
         return
@@ -315,7 +389,7 @@ def find_any_one(dir, *patterns):
 
     if len(paths) == 0:
         return
-    
+
     return paths[0]
 
 def find_only_one(dir, *patterns):
@@ -323,7 +397,7 @@ def find_only_one(dir, *patterns):
 
     if len(paths) == 0:
         return
-    
+
     assert len(paths) == 1
 
     return paths[0]
@@ -341,7 +415,7 @@ def make_dir(dir):
 
 # Returns the current working directory so you can change it back
 def change_dir(dir):
-    notice("Changing directory to '{}'", dir)
+    notice("Changing directory to '{0}'", dir)
 
     cwd = current_dir()
     _os.chdir(dir)
@@ -374,24 +448,121 @@ class working_dir(object):
     def __exit__(self, type, value, traceback):
         change_dir(self.prev_dir)
 
-def _init_call(command, args, kwargs):
-    if args:
-        command = command.format(*args)
-
-    if "shell" not in kwargs:
-        kwargs["shell"] = True
-
-    notice("Calling '{}'", command)
-
-    return command, kwargs
-
 def call(command, *args, **kwargs):
-    command, args = _init_call(command, args, kwargs)
-    _subprocess.check_call(command, **kwargs)
+    proc = start_process(command, *args, **kwargs)
+
+    wait_for_process(proc)
+
+    if proc.returncode != 0:
+        command_string = _command_string(command)
+        command_string = command_string.format(*args)
+
+        raise CalledProcessError(proc.returncode, command_string)
+
+def call_for_exit_code(command, *args, **kwargs):
+    proc = start_process(command, *args, **kwargs)
+
+    wait_for_process(proc)
+
+    return proc.returncode
 
 def call_for_output(command, *args, **kwargs):
-    command, args = _init_call(command, args, kwargs)
-    return _subprocess.check_output(command, **kwargs)
+    kwargs["stdout"] = _subprocess.PIPE
+
+    proc = start_process(command, *args, **kwargs)
+    output = proc.communicate()[0]
+    exit_code = proc.poll()
+
+    if exit_code not in (None, 0):
+        command_string = _command_string(command)
+        command_string = command_string.format(*args)
+
+        error = CalledProcessError(exit_code, command_string)
+        error.output = output
+
+        raise error
+
+    return output
+
+def start_process(command, *args, **kwargs):
+    if _is_string(command):
+        command = command.format(*args)
+        command_args = _shlex.split(command)
+        command_string = command
+    elif isinstance(command, _collections.Iterable):
+        assert len(args) == 0, args
+        command_args = command
+        command_string = _command_string(command)
+    else:
+        raise Exception()
+
+    notice("Calling '{0}'", command_string)
+
+    if "shell" in kwargs and kwargs["shell"]:
+        proc = _Process(command_string, **kwargs)
+    else:
+        proc = _Process(command_args, **kwargs)
+
+    debug("{0} started", proc)
+
+    return proc
+
+def _command_string(command):
+    if _is_string(command):
+        return command
+
+    elems = ["\"{0}\"".format(x) if " " in x else x for x in command]
+
+    return " ".join(elems)
+
+class _Process(_subprocess.Popen):
+    def __init__(self, command, *args, **kwargs):
+        super(_Process, self).__init__(command, *args, **kwargs)
+
+        try:
+            self.name = kwargs["name"]
+        except KeyError:
+            if _is_string(command):
+                self.name = program_name(command)
+            elif isinstance(command, _collections.Iterable):
+                self.name = command[0]
+            else:
+                raise Exception()
+
+    def __repr__(self):
+        return "process {0} ({1})".format(self.pid, self.name)
+
+def stop_process(proc):
+    notice("Stopping {0}", proc)
+
+    if proc.poll() is not None:
+        if proc.returncode == 0:
+            debug("{0} already exited normally", proc)
+        elif proc.returncode == -(_signal.SIGTERM):
+            notice("{0} was already terminated", proc)
+        else:
+            m = "{0} already exited with code {1}"
+            error(m, proc, proc.returncode)
+
+        return
+
+    proc.terminate()
+
+    return wait_for_process(proc)
+
+def wait_for_process(proc):
+    debug("Waiting for {0} to exit", proc)
+
+    proc.wait()
+
+    if proc.returncode == 0:
+        debug("{0} exited normally", proc)
+    elif proc.returncode == -(_signal.SIGTERM):
+        notice("{0} exited after termination", proc)
+    else:
+        error("{0} exited with code {1}", proc, proc.returncode)
+
+    return proc.returncode
 
 def make_archive(input_dir, output_dir, archive_stem):
     temp_dir = make_temp_dir()
@@ -400,11 +571,11 @@ def make_archive(input_dir, output_dir, archive_stem):
     copy(input_dir, temp_input_dir)
     make_dir(output_dir)
 
-    output_file = "{}.tar.gz".format(join(output_dir, archive_stem))
+    output_file = "{0}.tar.gz".format(join(output_dir, archive_stem))
     output_file = absolute_path(output_file)
 
     with working_dir(temp_dir):
-        call("tar -czf {} {}", output_file, archive_stem)
+        call("tar -czf {0} {1}", output_file, archive_stem)
 
     return output_file
 
@@ -417,7 +588,7 @@ def extract_archive(archive_file, output_dir):
     archive_file = absolute_path(archive_file)
 
     with working_dir(output_dir):
-        call("tar -xf {}", archive_file)
+        call("tar -xf {0}", archive_file)
 
     return output_dir
 
@@ -425,7 +596,7 @@ def rename_archive(archive_file, new_archive_stem):
     assert is_file(archive_file)
 
     if name_stem(archive_file) == new_archive_stem:
-        return
+        return archive_file
 
     temp_dir = make_temp_dir()
 
@@ -513,3 +684,9 @@ def _copytree(src, dst, symlinks=False, ignore=None):
             errors.append((src, dst, str(why)))
     if errors:
         raise _shutil.Error(errors)
+
+def _is_string(obj):
+    try:
+        return isinstance(obj, basestring)
+    except NameError:
+        return isinstance(obj, str)

@@ -7,9 +7,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #   http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -39,40 +39,51 @@ def import_messages(cursor):
     notice("Importing messages")
 
     message = Message()
-    
+
     for id, mbox_message in mbox_messages_by_id.items():
         notice("Importing message {}", id)
-        
+
         from_header = mbox_message["From"]
-        
+
         if from_header.endswith("<jira@apache.org>"):
             continue
-        
+
         if from_header.endswith("<qpid-dev@incubator.apache.org>"):
             continue
-        
+
         if from_header.endswith("<git@git.apache.org>"):
             continue
 
         message.load_from_mbox_message(mbox_message)
 
-        message.thread_id = find_thread_id(mbox_message)
+        thread_id, thread_position = get_thread_info(mbox_message)
+
+        message.thread_id = thread_id
+        message.thread_position = thread_position
 
         message.save(cursor)
 
         cursor.connection.commit()
 
-def find_thread_id(mbox_message):
+# -> thread_id, thread_position
+def get_thread_info(mbox_message):
     in_reply_to = mbox_messages_by_id.get(mbox_message.get("In-Reply-To"))
+    thread_position = 0
 
     while True:
         if in_reply_to is None:
-            return mbox_message["Message-ID"]
-    
+            return mbox_message["Message-ID"], thread_position
+
         mbox_message = mbox_messages_by_id[mbox_message.get("In-Reply-To")]
         in_reply_to = mbox_messages_by_id.get(mbox_message.get("In-Reply-To"))
+        thread_position += 1
 
-database = MessageDatabase("data/data.sqlite")
+    raise Exception()
+
+database_file = "data/data.sqlite"
+remove(database_file)
+
+database = MessageDatabase(database_file)
 
 for name in list_dir("data", "*.mbox"):
     mbox_file = join("data", name)
