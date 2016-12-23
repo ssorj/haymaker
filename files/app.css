@@ -20,3 +20,39 @@
  */
 
 @import url(/brbn.css);
+
+#query input {
+    width: 100%;
+    padding: 0.4em;
+}
+
+#query button {
+    padding: 0.4em;
+}
+
+table.messages td:nth-last-child(2) {
+    width: 5%;
+    text-align: right;
+}
+
+table.messages td:nth-last-child(1) {
+    width: 25%;
+    text-align: right;
+}
+
+table.messages.four td:nth-child(1) {
+    width: 50%;
+}
+
+table.headers td, table.headers th {
+    border-bottom: none;
+    padding: 0.1em 0;
+}
+
+table.headers th:nth-child(1) {
+    width: 10em;
+}
+
+span.quoted {
+    color: gray;
+}

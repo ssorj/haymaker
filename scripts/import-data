@@ -83,7 +83,7 @@ def get_thread_info(mbox_message):
 database_file = "data/data.sqlite"
 remove(database_file)
 
-database = MessageDatabase(database_file)
+database = Database(database_file)
 
 for name in list_dir("data", "*.mbox"):
     mbox_file = join("data", name)

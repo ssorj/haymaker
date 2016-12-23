@@ -7,5 +7,8 @@ devel:
 
 import:
 	scripts/fetch-data
-	rm -f data/data.sqlite
 	scripts/import-data
+
+.PHONY: import-%
+update-%:
+	curl "https://raw.githubusercontent.com/ssorj/$*/master/python/$*.py" -o python/$*.py

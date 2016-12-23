@@ -16,15 +16,14 @@ Search and browse Qpid mailing list content.
 [message_page_body]
 <h1>{title}</h1>
 
-<table class="headers">
-  <tr><td>ID</td><td>{id}</td></tr>
-  <tr><td>In reply to</td><td>{in_reply_to_link}</td></tr>
-  <tr><td>Thread</td><td>{thread_link}</td></tr>
-  <tr><td>List</td><td>{list_id}</td></tr>
-  <tr><td>From</td><td>{from}</td></tr>
-  <tr><td>Date</td><td>{date}</td></tr>
-  <tr><td>Subject</td><td>{subject}</td></tr>
-</table>
+<p>In reply to {in_reply_to_link}</p>
+<p>Part of thread {thread_link}</p>
+
+{headers}
+
+<pre>{content}</pre>
+
+<h1>{title}</h1>
 
 <pre>{content}</pre>
 

@@ -27,15 +27,10 @@ import os
 import runpy
 import sys
 
-from tornado.wsgi import WSGIContainer
-from tornado.httpserver import HTTPServer
-from tornado.ioloop import IOLoop
+home = os.getcwd() # XXX home = os.path.normpath("@haystack_home@")
+sys.path.insert(0, os.path.join(home, "python"))
 
-# default_home_dir = os.path.normpath("@haystack_home@")
-home_dir = os.getcwd() # XXX
-
-sys.path.append(os.path.join(home_dir, "python"))
-
+import brbn
 import haystack
 import spindle
 
@@ -63,27 +58,23 @@ def main():
 
     args = parser.parse_args()
     config = load_config(args)
-    app = haystack.Application(home_dir)
+    app = haystack.Haystack(home)
+    server = brbn.Server(app, config["port"])
 
     app.load()
-
-    server = HTTPServer(WSGIContainer(app))
-    port = config["port"]
+    app.init()
+    app.start()
 
     try:
-        server.listen(port)
-    except OSError as e:
-        sys.exit(str(e))
-
-    log.info("Listening on port {}".format(port))
-    
-    IOLoop.current().start()
+        server.run()
+    except brbn.Error as e:
+        sys.exit("Error! {}".format(str(e)))
 
 def load_config(args):
     config_file = args.config
     config = dict()
 
-    config["home_dir"] = home_dir
+    config["home"] = home
     config["port"] = 8000
 
     if not os.path.exists(config_file):
