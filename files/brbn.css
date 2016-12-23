@@ -45,10 +45,15 @@ br {
 }
 
 body {
+    margin: 1em;
     font: 13pt/19pt "Source Sans Pro", sans-serif;
     font-weight: 400;
     color: rgba(0, 0, 0, 0.8);
     text-rendering: optimizeLegibility;
+    background: linear-gradient(to bottom,
+                                rgb(130, 130, 125),
+                                rgb(160, 160, 154) 200px,
+                                rgb(160, 160, 154)) no-repeat, rgb(160, 160, 154);    
 }
 
 code,
@@ -58,8 +63,9 @@ pre {
 
 h1,
 h2 {
-    font-weight: 400;
     line-height: 1.1em;
+    color: rgb(80, 80, 76);
+    font-weight: 300;
 }
 
 h1 a,
@@ -220,34 +226,30 @@ section {
 }
 
 #-head, #-body, #-foot {
-    margin-bottom: 0;
-}
-
-#-head {
-    padding: 1em 2em;
-    border-bottom: 1px solid #ddd;
-}
-
-#-body {
-    padding: 2em;
-}
-
-#-foot {
-    border-top: 1px solid #ddd;
-    padding: 1em 2em;
-}
-
-#-head-content, #-body-content, #-foot-content {
     max-width: 960px;
     margin: 0 auto;
 }
 
-#-head-content {
-    font-size: 0.9em;
+#-head, #-foot {
 }
 
-#-foot-content {
-    font-size: 0.8em;
+#-body {
+    padding: 2em;
+    margin: 1em auto;
+    background-color: white;
+    box-shadow: 0 0.2em 0.05em rgb(130, 130, 125);
+}
+
+#-head-content, #-body-content, #-foot-content {
+}
+
+#-head-content, #-foot-content {
+    font-size: 0.95em;
+    color: #ccc;
+}
+
+#-head-content a, #-foot-content a {
+    color: white;
 }
 
 #-path-navigation {
@@ -266,6 +268,10 @@ section {
 
 #-path-navigation > li:last-child:after {
     content: none;
+}
+
+#-global-navigation {
+    float: right;
 }
 
 @media screen and (max-width: 720px) {
@@ -305,6 +311,7 @@ section {
 @media print {
     body {
         font-size: 10pt;
+        margin: 0;
     }
 
     pre {
@@ -318,41 +325,6 @@ section {
 
     #-body {
         padding: 0;
+        box-shadow: none;
     }
-}
-
-#query input {
-    width: 100%;
-    padding: 0.4em;
-}
-
-#query button {
-    padding: 0.4em;
-}
-
-table.messages td:nth-last-child(2) {
-    width: 5%;
-    text-align: right;
-}
-
-table.messages td:nth-last-child(1) {
-    width: 25%;
-    text-align: right;
-}
-
-table.messages.four td:nth-child(1) {
-    width: 50%;
-}
-
-table.headers td {
-    border-bottom: none;
-    padding: 0.1em 0;
-}
-
-table.headers td:nth-child(1) {
-    width: 10em;
-}
-
-span.quoted {
-    color: gray;
 }

@@ -17,8 +17,10 @@
 # under the License.
 #
 
+import brbn
 import email.utils as _email
 import json as _json
+import logging as _logging
 import os as _os
 import quopri as _quopri
 import re as _re
@@ -28,133 +30,234 @@ import textwrap as _textwrap
 
 from datetime import datetime as _datetime
 
-from brbn import *
-from faller import *
 from pencil import *
 
-_log = logger("haystack")
+_log = _logging.getLogger("haystack")
 _strings = StringCatalog(__file__)
 _topics = _json.loads(_strings["topics"])
 
-class Application(BrbnApplication):
+class Application(brbn.Application):
     def __init__(self, home_dir):
         super().__init__(home_dir)
 
-        add_logged_module("haystack")
-
-        setup_console_logging("info")
-
-        path = _os.path.join(self.home_dir, "data", "data.sqlite")
+        path = _os.path.join(self.home, "data", "data.sqlite")
         self.database = MessageDatabase(path)
 
-        title = "Haystack"
-        href = "/index.html"
-        func = self.send_index
-        self.index_page = BrbnPage(self, None, title, href, func)
-
-        title = "Message '{}'"
-        href = "/message.html?id={}"
-        func = self.send_message
-        self.message_page = BrbnPage(self, self.index_page, title, href, func)
-
-        title = "Search '{}'"
-        href = "/search.html?query={}"
-        func = self.send_search
-        self.search_page = BrbnPage(self, self.index_page, title, href, func)
-
-        title = "Sender '{}'"
-        href = "/sender.html?address={}"
-        func = self.send_sender
-        self.sender_page = BrbnPage(self, self.index_page, title, href, func)
-
-        title = "Thread '{}'"
-        href = "/thread.html?id={}"
-        func = self.send_thread
-        self.thread_page = BrbnPage(self, self.index_page, title, href, func)
-
+        self.root_resource = _IndexPage(self)
+        self.search_page = _SearchPage(self)
+        self.thread_page = _ThreadPage(self)
+        self.message_page = _MessagePage(self)
+        
     def receive_request(self, request):
         request.database_connection = self.database.connect()
 
         try:
-            return self.send_response(request)
+            return super().receive_request(request)
         finally:
             request.database_connection.close()
 
-        return request.respond_not_found()
+class _IndexPage(brbn.Page):
+    def __init__(self, app):
+        super().__init__(app, "/index.html", _strings["index_page_body"])
+    
+    def get_title(self, request):
+        return "Haystack"
 
-    def send_index(self, request):
-        sql = ("select from_address from messages "
-               "group by from_address having count(id) > 200 "
-               "order by from_address collate nocase")
-
-        records = self.database.query(request, sql)
+    @brbn.xml
+    def render_topics(self, request):
         items = list()
-
-        for record in records:
-            address = record[0]
-            href = self.sender_page.get_href(key=address)
-            text = xml_escape(address)
-
-            items.append(html_a(text, href))
-
-        senders = html_ul(items, class_="three-column")
-
-        items = list()
-
+        
         for topic in _topics:
-            href = self.search_page.get_href(key=topic)
+            href = self.app.search_page.get_href(request, query=topic)
             text = xml_escape(topic)
 
             items.append(html_a(text, href))
 
-        topics = html_ul(items, class_="four-column")
+        return html_ul(items, class_="four-column")
 
-        values = {
-            "senders": senders,
-            "topics": topics,
-        }
+class _SearchPage(brbn.Page):
+    def __init__(self, app):
+        super().__init__(app, "/search.html", _strings["search_page_body"])
 
-        content = _strings["index"].format(**values)
+    def get_title(self, request):
+        query = request.get("query")
+        return "Search '{}'".format(query)
+    
+    def render_query(self, request):
+        query = request.get("query")
+        return query
 
-        return self.index_page.send_response(request, content)
+    @brbn.xml
+    def render_threads(self, request):
+        query = request.get("query")
 
-    def send_message(self, request):
+        sql = ("select * from messages where id in "
+               "(select distinct thread_id from messages_fts "
+               " where messages_fts match ? limit 1000) "
+               "order by date desc")
+
+        records = self.app.database.query(request, sql, query)
+        message = Message()
+        rows = list()
+
+        for record in records:
+            message.load_from_record(record)
+
+            thread_link = self.app.thread_page.get_object_link(request, message)
+
+            row = [
+                thread_link,
+                xml_escape(message.from_address),
+                message.authored_words,
+                xml_escape(str(_email.formatdate(message.date)[:-6])),
+            ]
+
+            rows.append(row)
+
+        return html_table(rows, False, class_="messages four")
+
+class _ThreadPage(brbn.ObjectPage):
+    def __init__(self, app):
+        super().__init__(app, "/thread.html", _strings["thread_page_body"])
+
+    def get_object(self, request):
         id = request.get("id")
+        return self.app.database.get(request, Message, id)
 
-        try:
-            message = self.database.get(request, Message, id)
-        except ObjectNotFound as e:
-            return request.respond_not_found()
+    def get_object_name(self, request, obj):
+        return "Thread '{}'".format(obj.subject)
+    
+    def process(self, request):
+        sql = ("select * from messages "
+               "where thread_id = ? "
+               "order by thread_position, date asc "
+               "limit 1000")
 
-        in_reply_to = None
-        in_reply_to_id = message.in_reply_to_id
-        in_reply_to_link = in_reply_to_id
+        records = self.app.database.query(request, sql, request.object.id)
 
-        if in_reply_to_id is not None:
-            try:
-                in_reply_to = self.database.get(request, Message, in_reply_to_id)
-            except ObjectNotFound:
-                pass
+        request.messages = list()
+        request.messages_by_id = dict()
 
-            if in_reply_to is not None:
-                in_reply_to_link = self.message_page.render_brief_link(in_reply_to)
+        for record in records:
+            message = Message()
+            message.load_from_record(record)
 
+            request.messages.append(message)
+            request.messages_by_id[message.id] = message
+        
+    def render_title(self, request):
+        return request.object.subject
+        
+    @brbn.xml
+    def render_index(self, request):
+        rows = list()
+        
+        for i, message in enumerate(request.messages):
+            date = _time.strftime("%d %b %Y", _time.gmtime(message.date))
+            number = i + 1
+            title = self.get_message_title(request, message, number)
+
+            row = [
+                html_a(xml_escape(title), "#{}".format(number)),
+                xml_escape(date),
+                message.authored_words,
+            ]
+
+            rows.append(row)
+
+        return html_table(rows, False, class_="messages")
+
+    @brbn.xml
+    def render_messages(self, request):
+        out = list()
+        
+        for i, message in enumerate(request.messages):
+            number = i + 1
+            title = self.get_message_title(request, message, number)
+
+            out.append(html_elem("h2", title, id=str(number)))
+            out.append(html_elem("pre", xml_escape(message.content)))
+
+        return "\n".join(out)
+
+    def get_message_title(self, request, message, number):
+        title = "{}. {}".format(number, message.from_name)
+
+        if message.in_reply_to_id is not None:
+            rmessage = request.messages_by_id.get(message.in_reply_to_id)
+
+            if rmessage is not None:
+                rperson = rmessage.from_name
+                title = "{} replying to {}".format(title, rperson)
+
+        return title
+
+class _MessagePage(brbn.ObjectPage):
+    def __init__(self, app):
+        super().__init__(app, "/message.html", _strings["message_page_body"])
+
+    def get_object(self, request):
+        id = request.get("id")
+        return self.app.database.get(request, Message, id)
+
+    def get_object_name(self, request, obj):
+        return "Message '{}'".format(obj.subject)
+
+    def render_title(self, request):
+        return self.render_subject(request)
+
+    def render_id(self, request):
+        return request.object.id
+
+    @brbn.xml
+    def render_thread_link(self, request):
         thread = None
-        thread_id = message.thread_id
+        thread_id = request.object.thread_id
         thread_link = thread_id
 
         if thread_id is not None:
             try:
-                thread = self.database.get(request, Message, thread_id)
+                thread = self.app.database.get(request, Message, thread_id)
             except ObjectNotFound:
                 pass
 
             if thread is not None:
-                thread_link = self.thread_page.render_brief_link(thread)
+                return self.app.thread_page.get_object_link(request, thread)
+    
+    @brbn.xml
+    def render_in_reply_to_link(self, request):
+        rmessage = None
+        rmessage_id = request.object.in_reply_to_id
+        rmessage_link = rmessage_id
 
+        if rmessage_id is not None:
+            try:
+                rmessage = self.database.get(request, Message, rmessage_id)
+            except ObjectNotFound:
+                pass
+
+            if rmessage is not None:
+                return self.app.message_page.get_object_link(request, rmessage)
+
+    def render_list_id(self, request):
+        return request.object.list_id
+
+    def render_from(self, request):
+        message = request.object
         from_field = "{} <{}>".format(message.from_name, message.from_address)
+        
+        return from_field
 
-        message_content = ""
+    def render_date(self, request):
+        return _email.formatdate(request.object.date)
+
+    def render_subject(self, request):
+        return request.object.subject
+
+    @brbn.xml
+    def render_content(self, request):
+        message = request.object
+        content = ""
 
         if message.content is not None:
             lines = list()
@@ -174,155 +277,10 @@ class Application(BrbnApplication):
 
                 lines.append(line)
 
-            message_content = "\n".join(lines)
+            content = "\n".join(lines)
 
-        values = {
-            "id": xml_escape(message.id),
-            "in_reply_to_link": in_reply_to_link,
-            "thread_link": thread_link,
-            "list_id": xml_escape(message.list_id),
-            "from": xml_escape(from_field),
-            "date": xml_escape(_email.formatdate(message.date)),
-            "subject": xml_escape(message.subject),
-            "message_content": message_content,
-        }
-
-        content = _strings["message"].format(**values)
-
-        return self.message_page.send_response(request, content, message)
-
-    def send_search(self, request):
-        query = request.get("query")
-        obj = Object(query, query)
-
-        sql = ("select * from messages where id in "
-               "(select distinct thread_id from messages_fts "
-               " where messages_fts match ? limit 1000) "
-               "order by date desc")
-
-        records = self.database.query(request, sql, query)
-        message = Message()
-        rows = list()
-
-        for record in records:
-            message.load_from_record(record)
-            thread_link = self.thread_page.render_brief_link(message)
-
-            row = [
-                thread_link,
-                xml_escape(message.from_address),
-                message.authored_words,
-                xml_escape(str(_email.formatdate(message.date)[:-6])),
-            ]
-
-            rows.append(row)
-
-        values = {
-            "query": xml_escape(query),
-            "messages": html_table(rows, False, class_="messages four"),
-        }
-
-        content = _strings["search"].format(**values)
-
-        return self.search_page.send_response(request, content, obj)
-
-    def send_sender(self, request):
-        address = request.get("address")
-        obj = Object(address, address)
-
-        sql = ("select * from messages where from_address = ? "
-               "order by date desc limit 1000")
-
-        records = self.database.query(request, sql, address)
-        message = Message()
-        rows = list()
-
-        for record in records:
-            message.load_from_record(record)
-            message_link = self.message_page.render_brief_link(message)
-
-            row = [
-                message_link,
-                message.authored_words,
-                xml_escape(str(_email.formatdate(message.date)[:-6])),
-            ]
-
-            rows.append(row)
-
-        values = {
-            "address": xml_escape(address),
-            "messages": html_table(rows, False, class_="messages"),
-        }
-
-        content = _strings["sender"].format(**values)
-
-        return self.sender_page.send_response(request, content, obj)
-
-    def send_thread(self, request):
-        id = request.get("id")
-
-        try:
-            head = self.database.get(request, Message, id)
-        except ObjectNotFound as e:
-            return request.respond_not_found()
-
-        sql = ("select * from messages "
-               "where thread_id = ? "
-               "order by thread_position, date asc "
-               "limit 1000")
-
-        records = self.database.query(request, sql, id)
-        messages = list()
-        messages_by_id = dict()
-
-        for record in records:
-            message = Message()
-            message.load_from_record(record)
-
-            messages.append(message)
-            messages_by_id[message.id] = message
-
-        thread_index_rows = list()
-        thread_content = list()
-
-        for i, message in enumerate(messages):
-            message_date = _time.strftime("%d %b %Y", _time.gmtime(message.date))
-            message_href = self.message_page.get_href(message)
-            message_number = i + 1
-            message_title = "{}. {}".format(message_number, message.from_name)
-
-            if message.in_reply_to_id is not None:
-                rmessage = messages_by_id.get(message.in_reply_to_id)
-
-                if rmessage is not None:
-                    rperson = rmessage.from_name
-                    message_title = "{} replying to {}".format(message_title, rperson)
-
-            row = [
-                html_a(xml_escape(message_title), "#{}".format(message_number)),
-                xml_escape(message_date),
-                message.authored_words,
-                html_a("Message", message_href),
-            ]
-
-            thread_index_rows.append(row)
-
-            thread_content.append(html_elem("h2", message_title, id=str(message_number)))
-            thread_content.append(html_elem("pre", message.content))
-
-        thread_index = html_table(thread_index_rows, False, class_="messages four")
-        thread_content = "\n".join(thread_content)
-
-        values = {
-            "subject": xml_escape(head.subject),
-            "thread_index": thread_index,
-            "thread_content": thread_content,
-        }
-
-        content = _strings["thread"].format(**values)
-
-        return self.thread_page.send_response(request, content, head)
-
+        return content
+        
 class MessageDatabase:
     def __init__(self, path):
         self.path = path

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env python3
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -18,4 +18,90 @@
 # under the License.
 #
 
-exec brbn --app haystack "$@"
+from __future__ import print_function
+from __future__ import unicode_literals
+
+import argparse
+import logging
+import os
+import runpy
+import sys
+
+from tornado.wsgi import WSGIContainer
+from tornado.httpserver import HTTPServer
+from tornado.ioloop import IOLoop
+
+# default_home_dir = os.path.normpath("@haystack_home@")
+home_dir = os.getcwd() # XXX
+
+sys.path.append(os.path.join(home_dir, "python"))
+
+import haystack
+import spindle
+
+user_dir = os.path.expanduser("~")
+default_config_file = os.path.join(user_dir, ".config", "haystack", "config.py")
+
+description = "Haystack!"
+
+parser = argparse.ArgumentParser(description=description)
+parser.add_argument("--port", metavar="PORT",
+                    help="Serve HTTP at PORT (8000)")
+parser.add_argument("--config", default=default_config_file, metavar="FILE",
+                    help="Load configuration from FILE")
+
+log = logging.getLogger("haystack")
+
+def main():
+    spindle.set_thread_name("haystack")
+    
+    spindle.add_logged_module("haystack")
+    spindle.add_logged_module("brbn")
+    spindle.add_logged_module("tornado")
+    
+    spindle.enable_console_logging("info")
+
+    args = parser.parse_args()
+    config = load_config(args)
+    app = haystack.Application(home_dir)
+
+    app.load()
+
+    server = HTTPServer(WSGIContainer(app))
+    port = config["port"]
+
+    try:
+        server.listen(port)
+    except OSError as e:
+        sys.exit(str(e))
+
+    log.info("Listening on port {}".format(port))
+    
+    IOLoop.current().start()
+
+def load_config(args):
+    config_file = args.config
+    config = dict()
+
+    config["home_dir"] = home_dir
+    config["port"] = 8000
+
+    if not os.path.exists(config_file):
+        config_file = os.path.join("/", "etc", "haystack", "config.py")
+
+    if os.path.exists(config_file):
+        log.info("Loading configuration from '{}'".format(config_file))
+
+        entries = runpy.run_path(config_file, config)
+        config.update(entries)
+
+    if args.port is not None:
+        config["port"] = args.port
+
+    return config
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

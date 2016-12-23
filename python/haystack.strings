@@ -1,55 +1,20 @@
-[page]
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-  <head>
-    <title>{title}</title>
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <link rel="stylesheet" href="/site.css" type="text/css"/>
-    <link rel="icon" href="" type="image/png"/>
-  </head>
-  <body>
-    <div id="-head">
-      <div id="-head-content">
-        {path_navigation}
-      </div>
-    </div>
-    <div id="-body">
-      <div id="-body-content">
-        {content}
-      </div>
-    </div>
-    <div id="-foot">
-      <div id="-foot-content">
-      </div>
-    </div>
-  </body>
-</html>
-
-[index]
+[index_page_body]
 <h1>Haystack</h1>
 
 Search and browse Qpid mailing list content.
 
-<h2>Search messages</h2>
+<h2>Search threads</h2>
 
 <form id="query" action="/search.html" method="get">
   <input name="query" autofocus="autofocus"/>
 </form>
 
-<h2>Messages by sender</h2>
-
-<p>The senders listed here are those with at least 200 messages.
-<!-- See <a href="">all senders</a>. --></p>
-
-{senders}
-
-<h2>Messages by topic</h2>
+<h2>Threads by topic</h2>
 
 {topics}
 
-[message]
-<h1>{subject}</h1>
+[message_page_body]
+<h1>{title}</h1>
 
 <table class="headers">
   <tr><td>ID</td><td>{id}</td></tr>
@@ -61,28 +26,28 @@ Search and browse Qpid mailing list content.
   <tr><td>Subject</td><td>{subject}</td></tr>
 </table>
 
-<pre>{message_content}</pre>
+<pre>{content}</pre>
 
-[search]
+[search_page_body]
 <h1>Search</h1>
 
 <form id="query" action="?" method="get">
   <input name="query" value="{query}" autofocus="autofocus"/>
 </form>
 
-{messages}
+{threads}
 
-[sender]
+[sender_page_body]
 <h1>{address}</h1>
 
 {messages}
 
-[thread]
-<h1>{subject}</h1>
+[thread_page_body]
+<h1>{title}</h1>
 
-{thread_index}
+{index}
 
-{thread_content}
+{messages}
 
 [topics]
 [
