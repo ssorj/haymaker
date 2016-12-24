@@ -45,6 +45,7 @@ help:
 clean:
 	rm -rf build
 	rm -rf install
+	rm -rf $$(find . -type d -name __pycache__)
 
 .PHONY: build
 build: ${TARGETS}
@@ -52,6 +53,8 @@ build: ${TARGETS}
 .PHONY: install
 install: build
 	scripts/install-files -n \*.py -n \*.strings python ${DESTDIR}${HAYSTACK_HOME}/python
+	scripts/install-files -n data.sqlite data ${DESTDIR}${HAYSTACK_HOME}/data
+	scripts/install-files files ${DESTDIR}${HAYSTACK_HOME}/files
 	scripts/install-files build/bin ${DESTDIR}${PREFIX}/bin
 
 .PHONY: devel
