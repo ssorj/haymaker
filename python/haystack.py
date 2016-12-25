@@ -46,7 +46,7 @@ class Haystack(brbn.Application):
         self.search_page = _SearchPage(self)
         self.thread_page = _ThreadPage(self)
         self.message_page = _MessagePage(self)
-        
+
     def receive_request(self, request):
         request.database_connection = self.database.connect()
 
@@ -58,14 +58,14 @@ class Haystack(brbn.Application):
 class _IndexPage(brbn.Page):
     def __init__(self, app):
         super().__init__(app, "/", _strings["index_page_body"])
-    
+
     def get_title(self, request):
         return "Haystack"
 
     @brbn.xml
     def render_topics(self, request):
         items = list()
-        
+
         for topic in _topics:
             href = self.app.search_page.get_href(request, query=topic)
             text = xml_escape(topic)
@@ -76,12 +76,12 @@ class _IndexPage(brbn.Page):
 
 class _SearchPage(brbn.Page):
     def __init__(self, app):
-        super().__init__(app, "/search.html", _strings["search_page_body"])
+        super().__init__(app, "/search", _strings["search_page_body"])
 
     def get_title(self, request):
         query = request.get("query")
         return "Search '{}'".format(query)
-    
+
     def render_query(self, request):
         return request.get("query")
 
@@ -95,45 +95,44 @@ class _SearchPage(brbn.Page):
                "order by date desc")
 
         escaped_query = query.replace("\"", "\"\"")
-        
+
         records = self.app.database.query(request, sql, escaped_query)
-        message = Message()
+        thread = Thread()
         rows = list()
 
         for record in records:
-            message.load_from_record(record)
+            thread.load_from_record(record)
 
-            thread_link = self.app.thread_page.get_object_link(request, message)
+            thread_link = thread.get_link(request)
 
             row = [
                 thread_link,
-                xml_escape(message.from_address),
-                message.authored_words,
-                xml_escape(str(_email.formatdate(message.date)[:-6])),
+                xml_escape(thread.from_address),
+                thread.authored_words,
+                xml_escape(str(_email.formatdate(thread.date)[:-6])),
             ]
 
             rows.append(row)
 
         return html_table(rows, False, class_="messages four")
 
-class _ThreadPage(brbn.ObjectPage):
+class _ThreadPage(brbn.Page):
     def __init__(self, app):
-        super().__init__(app, "/thread.html", _strings["thread_page_body"])
+        super().__init__(app, "/thread", _strings["thread_page_body"])
 
-    def get_object(self, request):
-        id = request.get("id")
-        return self.app.database.get(request, Message, id)
+    def get_title(self, request):
+        return "Thread '{}'".format(request.thread.subject)
 
-    def get_object_name(self, request, obj):
-        return "Thread '{}'".format(obj.subject)
-    
     def process(self, request):
+        id = request.get("id")
+        request.thread = self.app.database.get(request, Message, id)
+
         sql = ("select * from messages "
                "where thread_id = ? "
                "order by thread_position, date asc "
                "limit 1000")
 
-        records = self.app.database.query(request, sql, request.object.id)
+        records = self.app.database.query(request, sql, request.thread.id)
 
         request.messages = list()
         request.messages_by_id = dict()
@@ -144,14 +143,14 @@ class _ThreadPage(brbn.ObjectPage):
 
             request.messages.append(message)
             request.messages_by_id[message.id] = message
-        
+
     def render_title(self, request):
-        return request.object.subject
-        
+        return request.thread.subject
+
     @brbn.xml
     def render_index(self, request):
         rows = list()
-        
+
         for i, message in enumerate(request.messages):
             date = _time.strftime("%d %b %Y", _time.gmtime(message.date))
             number = i + 1
@@ -170,7 +169,7 @@ class _ThreadPage(brbn.ObjectPage):
     @brbn.xml
     def render_messages(self, request):
         out = list()
-        
+
         for i, message in enumerate(request.messages):
             number = i + 1
             title = self.get_message_title(request, message, number)
@@ -192,24 +191,24 @@ class _ThreadPage(brbn.ObjectPage):
 
         return title
 
-class _MessagePage(brbn.ObjectPage):
+class _MessagePage(brbn.Page):
     def __init__(self, app):
         super().__init__(app, "/message", _strings["message_page_body"])
 
-    def get_object(self, request):
+    def get_title(self, request):
+        return "Message '{}'".format(request.message.subject)
+
+    def process(self, request):
         id = request.get("id")
-        return self.app.database.get(request, Message, id)
-
-    def get_object_name(self, request, obj):
-        return "Message '{}'".format(obj.subject)
-
+        request.message = self.app.database.get(request, Message, id)
+    
     def render_title(self, request):
-        return self.render_subject(request)
+        return request.message.subject
 
     @brbn.xml
     def render_thread_link(self, request):
         thread = None
-        thread_id = request.object.thread_id
+        thread_id = request.message.thread_id
         thread_link = xml_escape(thread_id)
 
         if thread_id is not None:
@@ -219,14 +218,14 @@ class _MessagePage(brbn.ObjectPage):
                 pass
 
             if thread is not None:
-                thread_link = self.app.thread_page.get_object_link(request, thread)
+                thread_link = thread.get_link(request)
 
         return thread_link
-    
+
     @brbn.xml
     def render_in_reply_to_link(self, request):
         rmessage = None
-        rmessage_id = request.object.in_reply_to_id
+        rmessage_id = request.message.in_reply_to_id
         rmessage_link = nvl(xml_escape(rmessage_id), "[None]")
 
         if rmessage_id is not None:
@@ -236,13 +235,13 @@ class _MessagePage(brbn.ObjectPage):
                 pass
 
             if rmessage is not None:
-                rmessage_link = self.app.message_page.get_object_link(request, rmessage)
+                rmessage_link = rmessage.get_link(request)
 
         return rmessage_link
 
     @brbn.xml
     def render_headers(self, request):
-        message = request.object
+        message = request.message
         from_field = "{} <{}>".format(message.from_name, message.from_address)
 
         items = (
@@ -254,10 +253,10 @@ class _MessagePage(brbn.ObjectPage):
         )
 
         return html_table(items, False, True, class_="headers")
-    
+
     @brbn.xml
     def render_content(self, request):
-        message = request.object
+        message = request.message
         content = ""
 
         if message.content is not None:
@@ -281,13 +280,13 @@ class _MessagePage(brbn.ObjectPage):
             content = "\n".join(lines)
 
         return content
-        
+
 class Database:
     def __init__(self, path):
         self.path = path
 
         _log.info("Using database at {}".format(self.path))
-        
+
     def connect(self):
         # XXX thread local connections
         return _sqlite.connect(self.path)
@@ -382,18 +381,32 @@ class ObjectNotFound(Exception):
 
 class _DatabaseObject:
     table = None
-    
+
     def __init__(self, id, name, parent=None):
         self.id = id
         self._name = name
         self.parent = parent
 
+    def __repr__(self):
+        return format_repr(self, self.id)
+
     @property
     def name(self):
         return self._name
 
-    def __repr__(self):
-        return format_repr(self, self.id)
+    def get_link_href(self, request):
+        raise NotImplementedError()
+
+    def get_link_text(self, request):
+        return self.name
+
+    def get_link(self, request, text=None):
+        href = self.get_link_href(request)
+
+        if text is None:
+            text = self.get_link_text(request)
+
+        return "<a href=\"{}\">{}</a>".format(href, xml_escape(text))
 
 class Message(_DatabaseObject):
     table = "messages"
@@ -498,6 +511,16 @@ class Message(_DatabaseObject):
         dml = "insert into messages_fts ({}) values ({})".format(columns, values)
 
         cursor.execute(dml, args)
+
+    def get_link_href(self, request):
+        return request.app.message_page.get_href(request, id=self.id)
+
+    def get_link_title(self, request):
+        return self.subject
+
+class Thread(Message):
+    def get_link_href(self, request):
+        return request.app.thread_page.get_href(request, id=self.id)
 
 def _get_mbox_content(mbox_message):
     content_type = None
